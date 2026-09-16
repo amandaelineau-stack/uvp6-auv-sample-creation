@@ -13,7 +13,7 @@ Scripts for processing UVP6 data from the ALR platform.
 
 4) UVPApp sample file creation
 
-This script is tested only for use with ALR generated data. As this is 
+This script is tested only for use with ALR generated data.
 
 ## Setup
 
