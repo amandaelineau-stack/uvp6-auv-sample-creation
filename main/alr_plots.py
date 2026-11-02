@@ -6,12 +6,15 @@ that alr_data.py has already produced, and draws it.
     import alr_plots
 
     alr_plots.plot_pressure_overview(big_df)
-    alr_plots.plot_profile_detection(profiles_df, custom_column="pitch", ...)
+    alr_plots.plot_phase_detection(profiles_df, gradient_thresholds=[0.05, -0.05], ...)
     alr_plots.plot_vertical_velocity(profiles_df)
     alr_plots.plot_series_pair(big_df_with_profiles, "Temperature", "position_lat")
-    alr_plots.plot_profiles_and_transects(big_df_with_profiles)
+    alr_plots.plot_phase_sectioning(big_df_with_profiles)
 
 Each function returns (fig, axs) so the notebook can tweak the result further.
+
+Phases are coloured as in the documentation (Table 4.1): downcast d, upcast u,
+transect t, surface transect s and transition x.
 
 Backend note: choose your matplotlib backend in the notebook, not here —
 '%matplotlib inline' for figures in the notebook, or mpl.use('tkagg') for
@@ -19,12 +22,14 @@ interactive pan/zoom windows.
 """
 
 import matplotlib as mpl
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+# Colour and name of each phase type, as in the documentation (Table 4.1, Figure 4.1)
+PHASE_COLOURS = {"d": "#2a78d6", "u": "#eb6834", "t": "#1baf7a", "s": "#eda100", "x": "#9a9994"}
+PHASE_NAMES = {"d": "Downcast", "u": "Upcast", "t": "Transect", "s": "Surface transect", "x": "Transition"}
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +58,68 @@ def split_by_flags(profiles_df):
         clean.filter(pl.col("is_transect").cast(pl.Boolean)),
         clean.filter(pl.col("is_transect").cast(pl.Boolean).not_()),
     )
+
+
+def to_datetime64(series: pl.Series) -> np.ndarray:
+    """TIME column as datetime64[ns], whether it is still a Polars Datetime or
+    find_profiles' NaN padding has turned it into float nanoseconds."""
+    if series.dtype.is_temporal():
+        return series.cast(pl.Datetime("ns")).to_numpy()
+    ns = series.cast(pl.Float64).to_numpy()
+    out = np.full(ns.shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    ok = np.isfinite(ns)
+    out[ok] = ns[ok].astype("int64").astype("datetime64[ns]")
+    return out
+
+
+def phase_types(df, surface_thresh=5.0):
+    """Phase letter (d, u, t, s or x) of every row, with the rules of
+    alr_data.export_alr_netcdf: a profile is an upcast when its first depth is
+    deeper than its last one, a transect is a surface transect when its mean
+    depth is shallower than surface_thresh, and everything else is a transition.
+    Records that find_profiles could not classify (NaN padding at the start and
+    end) get "-": like the export, the figures leave them out."""
+    depth = df["DEPTH"].cast(pl.Float64).to_numpy()
+    types = np.full(depth.shape, "x")
+    types[~np.isfinite(df["is_profile"].cast(pl.Float64).fill_null(np.nan).to_numpy())] = "-"
+    for flag, num, kind in (("is_profile", "profile_num_new", "profile"),
+                            ("is_transect", "transect_num", "transect")):
+        member = df[flag].cast(pl.Float64).to_numpy() == 1
+        ids = df[num].cast(pl.Float64).to_numpy()
+        for i in np.unique(ids[member]):
+            rows = np.flatnonzero(member & (ids == i))
+            z = depth[rows]
+            z = z[np.isfinite(z)]
+            if kind == "profile":
+                types[rows] = "u" if z.size and z[0] > z[-1] else "d"
+            else:
+                types[rows] = "s" if z.size and z.mean() < surface_thresh else "t"
+    return types
+
+
+def _scatter_by_phase(ax, t, y, types, ms=1.5):
+    for k, colour in PHASE_COLOURS.items():
+        m = types == k
+        if m.any():
+            ax.plot(t[m], y[m], ".", ms=ms, ls="", color=colour, rasterized=True)
+
+
+def _phase_legend(fig, types):
+    handles = [plt.Line2D([], [], color=PHASE_COLOURS[k], lw=4, label=f"{k} – {PHASE_NAMES[k]}")
+               for k in PHASE_COLOURS if (types == k).any()]
+    fig.legend(handles=handles, loc="upper right", ncol=len(handles), frameon=False)
+
+
+def _format_time_axis(ax):
+    locator = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+
+
+def _window_title(fig, title):
+    """Name the interactive window (otherwise 'Figure 1', 'Figure 2', ...)."""
+    if fig.canvas.manager is not None:
+        fig.canvas.manager.set_window_title(title)
 
 
 # ---------------------------------------------------------------------------
@@ -90,72 +157,101 @@ def plot_pressure_overview(big_df, font_size=18, show=True):
 
 
 # ---------------------------------------------------------------------------
-# 3.1  Profile detection results
+# 3.1  Phase detection: the criteria behind each decision
 # ---------------------------------------------------------------------------
 
-def plot_profile_detection(
+def plot_phase_detection(
     profiles_df,
-    custom_column="pitch",
     gradient_thresholds=[0.05, -0.05],
     cust_gradient_thresholds=[0.005, -0.005],
+    custom_column="pitch",
+    surface_thresh=5.0,
+    strict_profiles=False,
+    use_only_pit_vel=False,
     show=True,
+    **_other_detection_params,
 ):
-    """Five-panel view of what find_profiles decided.
+    """Five panels sharing the time axis, to check why each record got its phase.
 
-    Panels: interpolated depth, vertical velocity, profile numbering, the custom
-    column, and the -(custom * velocity) product used for the custom threshold.
+    Panels: depth; criterion 1 (smoothed vertical velocity); pitch; criterion 2
+    (M = -pitch x vertical velocity, Eq. 2 of the documentation); profile
+    numbering before and after the duration and back-fill filters.
+
+    Pass the same thresholds as to alr_data.detect_profiles (any other detection
+    parameter is accepted and ignored), so that the figure shows the thresholds
+    actually used.
     """
-    profiles, not_profiles, transects, _ = split_by_flags(profiles_df)
+    t = to_datetime64(profiles_df["TIME"])
+    types = phase_types(profiles_df, surface_thresh)
 
-    fig, axs = plt.subplots(5, 1, figsize=(18, 10), height_ratios=[3, 3, 1, 3, 3], sharex=True)
+    def col(name):
+        return profiles_df[name].cast(pl.Float64).to_numpy()
 
-    axs[0].set(xlabel="Time", ylabel="Interpolated Depth")
-    axs[1].set(xlabel="Time", ylabel="Vertical Velocity")
-    axs[2].set(xlabel="Time", ylabel="Profile Number")
-    axs[3].set(xlabel="Time", ylabel=custom_column)
-    axs[4].set(xlabel="Time", ylabel=custom_column)
+    pos, neg = gradient_thresholds
+    cpos, cneg = cust_gradient_thresholds
 
-    # Profile vs not profile (depth + velocity)
-    for data, col, label in zip([profiles, not_profiles, transects],
-                                ["tab:blue", "tab:red", "tab:orange"],
-                                ["Profile", "Not Profile", "Transect"]):
-        axs[0].plot(data["TIME"].to_numpy(), -data["INTERP_DEPTH"].to_numpy(),
-                    marker=".", markersize=1, ls="", c=col, label=label)
-        axs[1].plot(data["TIME"].to_numpy(), data["smooth_grad"].to_numpy(),
-                    marker=".", markersize=1, ls="", c=col, label=label)
+    fig, axs = plt.subplots(5, 1, figsize=(16, 12), height_ratios=[3, 3, 2.2, 2.2, 1.4],
+                            sharex=True, constrained_layout=True)
 
-    # Raw gradients + thresholds
-    axs[1].plot(profiles_df["TIME"].to_numpy(), profiles_df["grad"].to_numpy(),
-                c="k", alpha=0.1, label="Raw Velocity")
-    for val, label in zip(gradient_thresholds, ["Gradient Thresholds", None]):
-        axs[1].axhline(val, ls="--", color="gray", label=label)
+    ax = axs[0]
+    _scatter_by_phase(ax, t, col("INTERP_DEPTH"), types)
+    ax.invert_yaxis()
+    ax.set_ylabel("Depth (dbar)")
+    ax.set_title("Phases detected", loc="left")
 
-    # Profile numbers, before and after the duration/backfill filtering
-    axs[2].plot(profiles_df["TIME"].to_numpy(), profiles_df["profile_num"].to_numpy(), c="gray")
-    axs[2].plot(profiles_df["TIME"].to_numpy(), profiles_df["profile_num_new"].to_numpy(), c="red")
+    ax = axs[1]
+    w_raw, w = col("grad"), col("smooth_grad")
+    ax.axhspan(neg, pos, color="0.92", zorder=0)
+    ax.plot(t, w_raw, color="0.75", lw=0.4, zorder=1, rasterized=True)
+    _scatter_by_phase(ax, t, w, types)
+    lo, hi = np.nanpercentile(w_raw, [0.5, 99.5])
+    ax.set_ylim(min(lo, 2 * neg), max(hi, 2 * pos))
+    ax.set_ylabel("Vertical velocity\n(dbar s⁻¹)")
+    ax.set_title(f"Criterion 1 – smoothed vertical velocity w̃ (raw in grey): "
+                 f"profile when w̃ is outside the grey band [{neg:g}, {pos:g}]", loc="left")
 
-    # Custom column
-    if custom_column in profiles_df.columns:
-        axs[3].plot(profiles_df["TIME"].to_numpy(),
-                    profiles_df[custom_column].to_numpy(),
-                    c="purple", marker=".", markersize=1, ls="", label=custom_column)
-        axs[3].legend(loc="right")
+    smooth_name = f"smooth_INTERP_{custom_column}"
+    if smooth_name in profiles_df.columns:
+        theta = col(smooth_name)
+        ax = axs[2]
+        if custom_column in profiles_df.columns:
+            ax.plot(t, col(custom_column), color="0.75", lw=0.4, zorder=1, rasterized=True)
+        _scatter_by_phase(ax, t, theta, types)
+        ax.set_ylabel(f"{custom_column.capitalize()}")
+        ax.set_title(f"Smoothed {custom_column} θ̃ (raw in grey)", loc="left")
 
-        # -(custom * velocity) product, the quantity cust_gradient_thresholds acts on
-        axs[4].plot(profiles_df["TIME"].to_numpy(),
-                    -profiles_df[f"smooth_INTERP_{custom_column}"].to_numpy()
-                    * profiles_df["smooth_grad"].to_numpy(),
-                    c="purple", marker=".", markersize=1, ls="", label=custom_column)
-        axs[4].legend(loc="right")
-        axs[4].set_ylim([0, 0.05])
+        ax = axs[3]
+        m = -theta * w
+        ax.axhspan(cneg, cpos, color="0.92", zorder=0)
+        _scatter_by_phase(ax, t, m, types)
+        lo, hi = np.nanpercentile(m, [0.5, 99.5])
+        ax.set_ylim(min(lo, 2 * cneg), max(hi, 4 * cpos))
+        ax.set_ylabel("M = −θ̃ · w̃")
+        ax.set_title(f"Criterion 2 – product M (Eq. 2): profile when M is outside the grey band "
+                     f"[{cneg:g}, {cpos:g}]; a transect also needs M < {cpos:g}", loc="left")
+    else:
+        for ax in axs[2:4]:
+            ax.text(0.5, 0.5, f"no '{custom_column}' column", transform=ax.transAxes, ha="center")
 
-    for val, label in zip(cust_gradient_thresholds, ["Gradient Thresholds", None]):
-        axs[4].axhline(val, ls="--", color="gray", label=label)
+    ax = axs[4]
+    for name, colour, label in (("profile_num", "0.6", "before filters"),
+                                ("profile_num_new", "#1f1f1e", "after minimum-duration and back-fill filters")):
+        n = col(name)
+        n[n < 0] = np.nan  # -1 means "not a profile"
+        ax.plot(t, n, color=colour, lw=1, label=label)
+    ax.set_ylabel("Profile no.")
+    ax.set_title("Profile numbering", loc="left")
+    ax.legend(loc="upper left", frameon=False, fontsize=8)
+    _format_time_axis(ax)
 
-    for ax in axs[:2]:
-        ax.legend(loc="upper right")
+    if use_only_pit_vel:
+        rule = "a record is part of a profile when criterion 2 is met"
+    else:
+        rule = f"a record is part of a profile when criterion 1 {'and' if strict_profiles else 'or'} 2 is met"
+    fig.suptitle(f"ALR phase detection – {rule}", x=0.01, ha="left", fontweight="bold")
+    _phase_legend(fig, types)
+    _window_title(fig, "ALR phase detection – criteria")
 
-    plt.tight_layout()
     if show:
         plt.show()
 
@@ -233,77 +329,66 @@ def plot_series_pair(big_df_with_profiles, var1="Temperature", var2="position_la
     return fig, axs
 
 
-def plot_profiles_and_transects(big_df_with_profiles, show=True):
-    """Three-panel summary: profiles (original vs filtered), raw pressure, transects.
+def plot_phase_sectioning(big_df_with_profiles, surface_thresh=5.0, show=True):
+    """Result of the sectioning: the deployment coloured by phase, and below it
+    one block per phase (one block = one netCDF file = one sample), with the
+    segment boundaries (a new segment at each downcast starting shallower than
+    surface_thresh)."""
+    df = big_df_with_profiles
+    t = to_datetime64(df["TIME"])
+    z = df["DEPTH"].cast(pl.Float64).to_numpy()
+    types = phase_types(df, surface_thresh)
 
-    Each profile and transect gets its own shade, with inset colorbars keying
-    the shade back to the profile/transect number.
-    """
-    time_vals = to_pytime(big_df_with_profiles["TIME"])
-    pressure_vals = big_df_with_profiles["DEPTH"].to_numpy()
-    profile_nums = big_df_with_profiles["profile_num"].to_numpy()
-    transect_nums = big_df_with_profiles["transect_num"].to_numpy()
-    profile_nums_new = big_df_with_profiles["profile_num_new"].to_numpy()
+    # Phase runs: a new run when the phase type or the profile/transect number changes
+    pid = df["profile_num_new"].cast(pl.Float64).fill_nan(-1).fill_null(-1).to_numpy()
+    tid = df["transect_num"].cast(pl.Float64).fill_nan(-1).fill_null(-1).to_numpy()
+    group = np.where(np.isin(types, ["d", "u"]), pid, np.where(np.isin(types, ["t", "s"]), tid, -1))
+    change = np.flatnonzero((types[1:] != types[:-1]) | (group[1:] != group[:-1])) + 1
+    starts = np.r_[0, change]
+    ends = np.r_[change, types.size]
+    runs = [(s, e, types[s]) for s, e in zip(starts, ends) if types[s] != "-"]
 
-    fig, axs = plt.subplots(3, 1, figsize=(18, 12), height_ratios=[3, 3, 3], sharex=True)
+    seg_starts = [t[s] for s, e, k in runs if k == "d" and np.isfinite(z[s]) and z[s] < surface_thresh]
+    counts = {k: sum(1 for *_, kk in runs if kk == k) for k in PHASE_COLOURS}
 
-    # === Profile plots ===
-    unique_profiles = np.unique(profile_nums[profile_nums >= 0])
-    unique_profiles_new = np.unique(profile_nums_new[profile_nums_new >= 0])
+    fig, (ax, ax_s) = plt.subplots(2, 1, figsize=(16, 8), height_ratios=[5, 1],
+                                   sharex=True, constrained_layout=True)
+    for s, e, k in runs:
+        ax.plot(t[s:e], z[s:e], color=PHASE_COLOURS[k], lw=1.4)
+    ax.invert_yaxis()
+    ax.set_ylabel("Depth (dbar)")
+    ax.axhline(surface_thresh, color="0.6", ls="--", lw=0.8)
+    ax.text(0.995, surface_thresh, f"surface threshold {surface_thresh:g} dbar", transform=ax.get_yaxis_transform(),
+            ha="right", va="bottom", fontsize=8, color="0.4")
 
-    cmap_orig = truncate_cmap("Blues")
-    norm_orig = Normalize(vmin=unique_profiles.min(), vmax=unique_profiles.max())
-    cmap_new = truncate_cmap("Reds")
-    norm_new = Normalize(vmin=unique_profiles_new.min(), vmax=unique_profiles_new.max())
+    x = mdates.date2num(t)
+    for k, colour in PHASE_COLOURS.items():
+        bars = [(x[s], x[e - 1] - x[s]) for s, e, kk in runs if kk == k]
+        if bars:
+            ax_s.broken_barh(bars, (0.1, 0.8), facecolors=colour, edgecolors="white", linewidth=0.5)
+    ax_s.set_ylim(0, 1)
+    ax_s.set_yticks([])
+    ax_s.set_ylabel("Phases")
+    for a in (ax, ax_s):
+        for s in seg_starts:
+            a.axvline(s, color="0.5", ls=":", lw=0.8)
+    _format_time_axis(ax_s)
 
-    # Original profiles (blue)
-    for pid in unique_profiles:
-        mask = profile_nums == pid
-        axs[0].plot(time_vals[mask], pressure_vals[mask],
-                    color=cmap_orig(norm_orig(pid)), lw=2, alpha=0.9)
+    summary = (f"{counts['d']} downcasts, {counts['u']} upcasts, {counts['t']} transects, "
+               f"{counts['s']} surface transects, {counts['x']} transitions – {len(seg_starts) + 1} segments "
+               f"(dotted lines)")
+    ax.set_title(f"{len(runs)} phases: {summary}", loc="left")
+    fig.suptitle("ALR phase sectioning – result (one phase = one netCDF file = one sample)",
+                 x=0.01, ha="left", fontweight="bold")
+    _phase_legend(fig, types)
+    _window_title(fig, "ALR phase sectioning – result")
 
-    # Filtered profiles (red)
-    for pid in unique_profiles_new:
-        mask = profile_nums_new == pid
-        axs[0].plot(time_vals[mask], pressure_vals[mask],
-                    color=cmap_new(norm_new(pid)), lw=1.5, alpha=0.9)
-
-    axs[0].invert_yaxis()
-    axs[0].set(ylabel="Pressure (dbar)", title="Profiles (Original vs Filtered)")
-
-    # Colorbars (inset)
-    cax1 = inset_axes(axs[0], width="35%", height="4%", loc="lower left", borderpad=2)
-    fig.colorbar(ScalarMappable(norm=norm_orig, cmap=cmap_orig),
-                 cax=cax1, orientation="horizontal", label="Original profile #")
-    cax2 = inset_axes(axs[0], width="35%", height="4%", loc="lower right", borderpad=2)
-    fig.colorbar(ScalarMappable(norm=norm_new, cmap=cmap_new),
-                 cax=cax2, orientation="horizontal", label="Filtered profile #")
-
-    # === Raw pressure ===
-    axs[1].plot(time_vals, pressure_vals, ".", markersize=1, c="tab:blue")
-    axs[1].invert_yaxis()
-    axs[1].set(ylabel="Pressure (dbar)")
-
-    # === Transects ===
-    unique_transects = np.unique(transect_nums[transect_nums >= 0])
-    cmap_transects = truncate_cmap("Greens")
-    norm_transects = Normalize(vmin=unique_transects.min(), vmax=unique_transects.max())
-
-    for tid in unique_transects:
-        mask = transect_nums == tid
-        axs[2].plot(time_vals[mask], pressure_vals[mask],
-                    color=cmap_transects(norm_transects(tid)), lw=1)
-
-    axs[2].invert_yaxis()
-    axs[2].set(ylabel="Pressure (dbar)", title="Transects")
-
-    # Colorbar inset
-    cax_tr = inset_axes(axs[2], width="50%", height="4%", loc="lower center", borderpad=1.5)
-    fig.colorbar(ScalarMappable(norm=norm_transects, cmap=cmap_transects),
-                 cax=cax_tr, orientation="horizontal", label="Transect number")
-
-    fig.tight_layout()
     if show:
         plt.show()
 
-    return fig, axs
+    return fig, (ax, ax_s)
+
+
+# Former names, kept so that existing notebooks keep working
+plot_profile_detection = plot_phase_detection
+plot_profiles_and_transects = plot_phase_sectioning
