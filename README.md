@@ -8,7 +8,7 @@ A demonstration project, `ALR_4_demo`, is available here (link).
 
 [`run_UVP_toolbox.py`](run_UVP_toolbox.py) runs the UVP6 data processing workflow:
 
-1. **Load and parse the ALR CTD and navigation (NAV) files**
+1. **Load and parse the ALR data (CTD and NAV)**
 2. **Identify the ALR phases (profiles, transects, transitions) from the CTD and NAV data**
 3. **Generate one netCDF file per ALR phase**
 4. **Generate one sample file compatible with UVPapp (header file)**
@@ -62,6 +62,10 @@ UVPapp sets this name when the project is created. `<first_deployment_date>` is 
 of the deployment (`yyyymmdd`), not the date the project was created, e.g.
 `uvp6_sn000227lp_20240807_dy180_biocarbon1_alr4`.
 
+The project must be complete, with all the UVPapp folders (`calibration`, `config`, `CTDdata`, `doc`,
+`ecodata`, `livecamera`, `log`, `meta`, `raw`, `results`), as `ALR_4_demo` is: the pipeline does not
+create them, and cell 3 stops with the list of the missing ones.
+
 When the UVP6 restarted during the deployment, merge its sequences in UVPapp first: the
 pipeline uses the merged sequence (`_Merged-NNN`) and ignores the originals (`_UsedForMerge`).
 
@@ -78,7 +82,7 @@ At the top of [`run_UVP_toolbox.py`](run_UVP_toolbox.py):
 | `PHASE_DETECTION` | Thresholds of the phase detection (any other `alr_data.detect_profiles` parameter can be added). The same values are drawn on the phase detection figure. |
 | `DEPTH_INTEGRATION` | `integrationtime` of the depth-integrated samples (`P`: downcasts, upcasts, transitions), in m. 5 by default. |
 | `TIME_INTEGRATION` | `integrationtime` of the time-integrated samples (`T`: transects, surface transects), in s. 3600 by default. |
-| `UVP_PROJECT_DIRS` | Folders of a UVPapp project, created in cell 3 when missing (`calibration`, `config`, `CTDdata`, `doc`, `ecodata`, `livecamera`, `log`, `meta`, `raw`, `results`). |
+| `UVP_PROJECT_DIRS` | Folders of a UVPapp project (`calibration`, `config`, `CTDdata`, `doc`, `ecodata`, `livecamera`, `log`, `meta`, `raw`, `results`), checked in cell 3. |
 
 In cell 4, `assume_yes=False` asks before replacing an existing sample file;
 `True` replaces it without asking.
@@ -92,9 +96,9 @@ once instead: `python run_UVP_toolbox.py` in a terminal.
 | Cell | Asks for (in order) | What happens |
 | --- | --- | --- |
 | 0. Setup | – | Imports and settings. |
-| 1. Load and parse the ALR CTD and NAV files | CTD folder, NAV folder, figures folder | Reads and merges the CTD and NAV files. |
+| 1. Load and parse the ALR data (CTD and NAV) | CTD folder, NAV folder, figures folder | Reads and merges the CTD and NAV files. |
 | 2. Identify the ALR phases | – | Detects the phases; displays and saves two figures and prints the phase checks (see [Quality-control figures](#quality-control-figures)). |
-| 3. Generate one netCDF file per ALR phase | UVP6 project folder | Creates the missing project folders; writes one netCDF per ALR phase in `meta/alr_meta_sn004/`. |
+| 3. Generate one netCDF file per ALR phase | UVP6 project folder | Checks the project folders; writes one netCDF per ALR phase in `meta/alr_meta_sn004/`. |
 | 4. Generate the UVPapp sample file | Yes/No if a sample file exists | Matches the UVP6 images to the ALR phases; writes the sample file, the CTD files, the diagnostic and quality-check figures. |
 
 Figure windows open one at a time: close each one to continue.
