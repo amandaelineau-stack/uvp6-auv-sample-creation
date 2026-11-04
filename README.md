@@ -90,6 +90,23 @@ In cell 4, `assume_yes=False` asks before replacing an existing sample file;
 
 ## Run
 
+### With the app (no code to edit)
+
+Double-click [`start_app.bat`](start_app.bat) (or run `python -m streamlit run app.py` in the
+`alr_uvp` environment). The app opens in the web browser, and runs on this computer only:
+
+1. **Data**: choose the deployment folder (as `ALR4_demo`); the ALR CTD and NAV folders, the UVP6
+   project and the figures folder are found in it, and checked (files found, complete UVPapp
+   project, one merged sequence).
+2. **Settings**: ALR serial number, cruise, sample integration and, if needed, the phase detection
+   thresholds.
+3. **Run**: the four cells below, one after the other.
+4. **Results**: the sample file (to download), the phase checks, the quality checks and the figures.
+
+The app writes the same files as the script.
+
+### With the script
+
 Open `run_UVP_toolbox.py` in VS Code and click **Run Cell** above each `# %%`
 marker, in order; the cells run in an Interactive Window. To run it all at
 once instead: `python run_UVP_toolbox.py` in a terminal.
