@@ -85,7 +85,7 @@ project = prompter.choose_directory("Select the UVP6 project folder")
 assert project is not None, "cancelled"
 project = Path(project)
 
-# A complete UVPapp project is expected (as ALR_4_demo): its folders are not created here
+# A complete UVPapp project is expected (as ALR4_demo): its folders are not created here
 missing = [d for d in UVP_PROJECT_DIRS if not (project / d).is_dir()]
 assert not missing, f"Not a complete UVPapp project, missing folder(s): {', '.join(missing)}"
 
