@@ -229,3 +229,4 @@ __marimo__/
 # Demo data (distributed as the ALR4_demo release) and documents kept next to the code
 ALR4_demo/
 *.docx
+ALR_UVP_*.pdf
