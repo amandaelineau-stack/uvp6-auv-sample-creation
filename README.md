@@ -48,6 +48,7 @@ directly inside each folder is read and merged; subfolders are ignored.
 └── <alr_serial_number>_nav_data/
     └── *.csv
 ```
+e.g. `ALR004_ctd_data/` and `ALR004_nav_data/` in `ALR_4_demo`, next to the UVP6 project folder.
 In future releases, the ALR CTD and NAV data will come in a single netCDF file.
 
 ### 3. Structure the UVP6 project directories
