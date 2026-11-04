@@ -26,6 +26,7 @@ from uvp_toolbox.prompts import NullPrompter
 
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
                     "livecamera", "log", "meta", "raw", "results")
+BUTTON_WIDTH = 420  # px, the Run and Download buttons
 
 st.set_page_config(page_title="ALR–UVP6 pipeline", page_icon="🌊", layout="wide")
 
@@ -61,36 +62,51 @@ def fill_from_deployment(folder):
         st.session_state["serial"] = int(m.group(1))
 
 
-def folder_input(label, key, help_, on_change=None):
+def folder_input(label, key, help_, on_change=None, status=None):
+    """Folder field; `status` = (ok, text) is shown in its title, green when ok, red otherwise."""
+    if status is not None:
+        ok, text = status
+        label = f":green[✅ **{label}** · {text}]" if ok else f":red[⚠️ **{label}** · {text}]"
     c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
     c1.text_input(label, key=key, help=help_, on_change=on_change)
     c2.button("Browse…", key=f"b_{key}", on_click=browse, args=(key,), use_container_width=True)
     return Path(st.session_state[key]) if st.session_state.get(key) else None
 
 
-def check_inputs(ctd, nav, project, figures):
-    """(ok, list of (ok, message)) for the folders chosen."""
-    rows = []
-    n_ctd = len(alr_data.list_data_files(ctd, "*.log")) if ctd and ctd.is_dir() else 0
-    rows.append((n_ctd > 0, f"ALR CTD folder: {n_ctd} .log file(s)" if ctd else "ALR CTD folder: not chosen"))
-    n_nav = len(alr_data.list_data_files(nav, "*.csv")) if nav and nav.is_dir() else 0
-    rows.append((n_nav > 0, f"ALR NAV folder: {n_nav} .csv file(s)" if nav else "ALR NAV folder: not chosen"))
-    if project and project.is_dir():
-        missing = [d for d in UVP_PROJECT_DIRS if not (project / d).is_dir()]
-        rows.append((not missing, "UVP6 project: complete UVPapp project" if not missing
-                     else f"UVP6 project: missing folder(s) {', '.join(missing)}"))
-        seqs = [p.name for p in (project / "raw").glob("*") if p.is_dir() and not p.name.endswith("_UsedForMerge")]
-        rows.append((len(seqs) == 1, f"UVP6 sequence in raw/: {', '.join(seqs) or 'none'}"
-                     + ("" if len(seqs) <= 1 else " (merge them in UVPapp first)")))
-        # netCDF (HDF5) cannot write past the 260-character Windows path limit
-        longest = len(str(project.resolve() / "meta" / "alr_meta_sn000" / "archives" / "ALR000_yyyymmdd_0000_0000_x0000.nc"))
-        if longest > 259:
-            rows.append((False, f"UVP6 project path too long for Windows ({longest} > 259 characters for the netCDF "
-                                "files): move the deployment folder to a shorter path, e.g. C:\\ALR"))
-    else:
-        rows.append((False, "UVP6 project: not chosen" if not project else "UVP6 project: folder not found"))
-    rows.append((figures is not None, f"Figures folder: {figures}" if figures else "Figures folder: not chosen"))
-    return all(ok for ok, _ in rows), rows
+def files_status(folder, pattern):
+    if not folder:
+        return False, "not chosen yet"
+    if not folder.is_dir():
+        return False, "folder not found"
+    n = len(alr_data.list_data_files(folder, pattern))
+    return n > 0, f"{n} {pattern[1:]} file{'s' if n != 1 else ''} found" if n else f"no {pattern[1:]} file in this folder"
+
+
+def project_status(project):
+    if not project:
+        return False, "not chosen yet"
+    if not project.is_dir():
+        return False, "folder not found"
+    missing = [d for d in UVP_PROJECT_DIRS if not (project / d).is_dir()]
+    if missing:
+        return False, f"not a complete UVPapp project, missing folder{'s' if len(missing) > 1 else ''}: {', '.join(missing)}"
+    seqs = [p for p in (project / "raw").iterdir() if p.is_dir()]
+    used = sum(p.name.endswith("_UsedForMerge") for p in seqs)
+    n = len(seqs) - used
+    if n != 1:
+        return False, (f"{n} sequences in raw/: merge them in UVPapp first" if n else "no UVP6 sequence in raw/")
+    # netCDF (HDF5) cannot write past the 260-character Windows path limit
+    longest = len(str(project.resolve() / "meta" / "alr_meta_sn000" / "archives" / "ALR000_yyyymmdd_0000_0000_x0000.nc"))
+    if longest > 259:
+        return False, (f"path too long for Windows ({longest} > 259 characters for the netCDF files): "
+                       "move the deployment folder to a shorter path, e.g. C:\\ALR")
+    return True, "complete UVPapp project, 1 sequence in raw/" + (f" ({used} merged sequences ignored)" if used else "")
+
+
+def figures_status(figures):
+    if not figures:
+        return False, "not chosen yet"
+    return True, "found" if figures.is_dir() else "will be created"
 
 
 # ---------------------------------------------------------------- pipeline
@@ -164,25 +180,26 @@ st.caption("Creates the UVPapp sample file of a UVP6 deployment on an Autosub Lo
 for k, v in (("deployment", ""), ("ctd", ""), ("nav", ""), ("project", ""), ("figures", ""), ("serial", 4)):
     st.session_state.setdefault(k, v)
 
-st.header("1 · Data")
-st.write("Choose the folder of the deployment (as **ALR4_demo**): the other folders are found in it. "
-         "You can also choose each folder below.")
+st.header("1 · Choose the data folders")
+st.write("Choose the folder of the deployment (as **ALR4_demo**): the four folders below are found in it. "
+         "You can also choose each folder yourself. Each title turns green once its folder is ready.")
 folder_input("Deployment folder", "deployment",
              "Folder holding <serial>_ctd_data, <serial>_nav_data and the uvp6_… project",
              on_change=lambda: Path(st.session_state["deployment"]).is_dir()
              and fill_from_deployment(Path(st.session_state["deployment"])))
+as_path = lambda key: Path(st.session_state[key]) if st.session_state.get(key) else None
+statuses = [files_status(as_path("ctd"), "*.log"), files_status(as_path("nav"), "*.csv"),
+            project_status(as_path("project")), figures_status(as_path("figures"))]
+ok = all(good for good, _ in statuses)
 with st.container(border=True):
-    ctd = folder_input("ALR CTD folder (.log files)", "ctd", "Every .log file directly in this folder is read")
-    nav = folder_input("ALR NAV folder (.csv files)", "nav", "Every .csv file directly in this folder is read")
+    ctd = folder_input("ALR CTD folder", "ctd", "Every .log file directly in this folder is read", status=statuses[0])
+    nav = folder_input("ALR NAV folder", "nav", "Every .csv file directly in this folder is read", status=statuses[1])
     project = folder_input("UVP6 project folder (UVPapp)", "project",
-                           "uvp6_<serial>_<date>_<cruise>_<platform>: a complete UVPapp project, sequences merged")
-    figures = folder_input("Figures folder", "figures", "Created if it does not exist")
+                           "uvp6_<serial>_<date>_<cruise>_<platform>: a complete UVPapp project, sequences merged",
+                           status=statuses[2])
+    figures = folder_input("Figures folder", "figures", "Where the figures are saved", status=statuses[3])
 
-ok, rows = check_inputs(ctd, nav, project, figures)
-for good, msg in rows:
-    (st.success if good else st.error)(msg, icon="✅" if good else "⚠️")
-
-st.header("2 · Settings")
+st.header("2 · Check the processing settings")
 c1, c2, c3, c4 = st.columns(4)
 serial = c1.number_input("ALR serial number", min_value=1, max_value=999, step=1, key="serial",
                          help="4 gives ALR004")
@@ -199,11 +216,15 @@ with st.expander("Phase detection thresholds (advanced)"):
                          help="cust_gradient_thresholds = [+c, −c]")
 thresholds = dict(gradient_thresholds=[g, -g], cust_gradient_thresholds=[cg, -cg])
 
-st.header("3 · Run")
+st.header("3 · Run the pipeline")
+st.write("The four steps run one after the other: load the ALR data, identify the ALR phases, write one "
+         "netCDF file per phase, and create the sample header file for UVPapp.")
 if project and (project / "meta").is_dir() and any((project / "meta").glob("uvp6_header_*.txt")):
     st.info("This project already has a sample file: it will be moved to meta/archives/, "
             "and the phase netCDF files of the previous run to meta/alr_meta_sn…/archives/.", icon="ℹ️")
-if st.button("Run the pipeline", type="primary", disabled=not ok, use_container_width=True):
+if not ok:
+    st.caption(":red[Choose the folders above first: the button is enabled once all their titles are green.]")
+if st.button("Run the pipeline", type="primary", disabled=not ok, width=BUTTON_WIDTH):
     log = {}
     try:
         res = run_pipeline(ctd, nav, project, figures, int(serial), cruise.strip(), depth_int, time_int,
@@ -224,15 +245,16 @@ if "error" in st.session_state:
 # ---------------------------------------------------------------- results
 res = st.session_state.get("result")
 if res:
-    st.header("4 · Results")
+    st.header("4 · Results: sample header file, checks and figures")
     fig_dir, alr = res["figures"], f"ALR{res['serial']:03d}"
     sample = res["sample_file"]
+    st.download_button("Download the sample header file for UVPapp", sample.read_bytes(), file_name=sample.name,
+                       type="primary", width=BUTTON_WIDTH)
+    st.caption(f"Also saved in the UVP6 project: {sample}")
     c1, c2, c3 = st.columns(3)
     c1.metric("Phase netCDF files", res["n_netcdf"])
     c2.metric("Samples", max(0, len(sample.read_text(encoding="cp1252").splitlines()) - 1))
     c3.metric("Phase warnings", len(res["phase_warnings"]))
-    st.success(f"Sample file: {sample}", icon="📄")
-    st.download_button("Download the sample file", sample.read_bytes(), file_name=sample.name)
 
     show = lambda name, cap: st.image(str(fig_dir / name), caption=cap) if (fig_dir / name).exists() else None
     t1, t2, t3, t4 = st.tabs(["Phases", "Quality checks", "Time–depth", "Messages"])
