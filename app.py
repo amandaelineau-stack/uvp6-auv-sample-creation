@@ -179,6 +179,10 @@ st.caption("Creates the UVPapp sample file of a UVP6 deployment on an Autosub Lo
 
 for k, v in (("deployment", ""), ("ctd", ""), ("nav", ""), ("project", ""), ("figures", ""), ("serial", 4)):
     st.session_state.setdefault(k, v)
+# the deployment folder can be given in the address: http://localhost:8501/?deployment=C:\ALR\ALR4_demo
+if not st.session_state["deployment"] and Path(st.query_params.get("deployment", "")).is_dir():
+    st.session_state["deployment"] = st.query_params["deployment"]
+    fill_from_deployment(Path(st.session_state["deployment"]))
 
 st.header("1 · Choose the data folders")
 st.write("Choose the folder of the deployment (as **ALR4_demo**): the four folders below are found in it. "
