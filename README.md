@@ -8,22 +8,56 @@ A demonstration project, `ALR4_demo`, can be downloaded from the [ALR4_demo rele
 
 ## Quick start: the app
 
-The pipeline can be run from an app in the web browser, with no code to edit. GitHub only stores
-the code: the app runs on your own computer, on your own data.
+The pipeline can be run from an app in your web browser, with no code to edit (Windows).
+GitHub only stores the code: the app runs on your own computer, on your own data, and nothing
+is sent anywhere.
 
-1. **Get the code**: *Code* → *Download ZIP* at the top of this page, and extract it (or `git clone`).
-2. **Get the demo data** (optional): download [ALR4_demo.zip](https://github.com/amandaelineau-stack/ALR_UVP_Processing/releases/download/ALR4_demo/ALR4_demo.zip)
-   and extract it to a short path, e.g. `C:\ALR\ALR4_demo` (Windows limits paths to 260 characters).
-3. **Install Python** 3.12, e.g. with [Miniconda](https://docs.anaconda.com/miniconda/), then, in the
-   code folder: `conda env create -f environment.yml` and `conda activate alr_uvp` (see [Setup](#setup)).
-4. **Start the app**: double-click [`start_app.bat`](start_app.bat) (or `python -m streamlit run app.py`).
-   It opens at http://localhost:8501.
-5. In the app, choose the deployment folder (e.g. `ALR4_demo`), check the settings and click
-   **Run the pipeline**. The sample file and the figures are written as with the script
-   (see [With the app](#with-the-app-no-code-to-edit)).
+### Once: install
 
-The link http://localhost:8501 only works on the computer running the app: to share the app,
-share this repository.
+1. **Download the code**: click the green **Code** button at the top of this page, then
+   **Download ZIP**, and extract the zip, e.g. to `C:\ALR\ALR_UVP_Processing`.
+2. **Download the demo data** (optional, to try the app): [ALR4_demo.zip](https://github.com/amandaelineau-stack/ALR_UVP_Processing/releases/download/ALR4_demo/ALR4_demo.zip)
+   (233 MB), and extract it to a short path, e.g. `C:\ALR\ALR4_demo`.
+   Windows cannot write files whose path is longer than 260 characters, which a deeply nested
+   folder (e.g. in OneDrive) can reach: the app warns you if so.
+3. **Install Miniconda** (free, it installs Python): download it from
+   [anaconda.com/download](https://www.anaconda.com/download/success) (*Miniconda* installer for
+   Windows) and install it with the default options: "Just Me", and keep
+   **Create shortcuts** ticked, which adds **Anaconda Prompt** to the Windows Start menu.
+4. **Create the environment of the app**: open **Anaconda Prompt** from the Start menu (click
+   Start and type "Anaconda Prompt", or find it under *Anaconda3 (64-bit)* or *Miniconda3* in the
+   list of apps). It is a black window where commands are typed. Type these two commands, each
+   followed by Enter:
+   ```
+   cd C:\ALR\ALR_UVP_Processing
+   conda env create -f environment.yml
+   ```
+   (the first one goes to the code folder of step 1). This downloads Python 3.12 and the packages
+   of the pipeline, in an environment called `alr_uvp`, in a few minutes. Then close the window.
+
+### Every time: run
+
+1. **Start the app**: double-click [`start_app.bat`](start_app.bat) in the code folder. A black
+   window opens (the first time, it installs the app in about a minute), then the app opens in
+   your web browser, at http://localhost:8501. Keep the black window open while you use the app;
+   close it to stop the app.
+2. **Data**: click **Browse…** next to *Deployment folder* and choose the folder of the deployment,
+   e.g. `C:\ALR\ALR4_demo`. The app finds the ALR CTD and NAV folders, the UVP6 project and the
+   figures folder in it, and checks them: each line must be green.
+3. **Settings**: check the ALR serial number (found from the folder names), the cruise and the
+   sample integration.
+4. **Run**: click **Run the pipeline**. Each step is shown as it runs (a few minutes for a long
+   deployment).
+5. **Results**: download the sample file, and look at the phase checks, the quality checks and
+   the figures. The app writes the same files as the script: the sample file and the CTD files in
+   the UVP6 project, the figures in the figures folder (see [Outputs](#outputs)).
+
+The address http://localhost:8501 only works on the computer running the app. To share the app
+with a colleague, share this repository: they install it and run it on their own computer.
+
+If the black window shows "python is not recognized", Miniconda was not found: open Anaconda
+Prompt and type `conda activate alr_uvp`, then `cd C:\ALR\ALR_UVP_Processing` and
+`python -m streamlit run app.py`.
 
 ## The script
 
