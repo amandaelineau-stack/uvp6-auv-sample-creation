@@ -8,6 +8,7 @@ import io
 import re
 import shutil
 import sys
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -260,7 +261,21 @@ if res:
     c2.metric("Samples", max(0, len(sample.read_text(encoding="cp1252").splitlines()) - 1))
     c3.metric("Phase warnings", len(res["phase_warnings"]))
 
-    show = lambda name, cap: st.image(str(fig_dir / name), caption=cap) if (fig_dir / name).exists() else None
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(fig_dir.rglob("*")):
+            if f.suffix.lower() in (".png", ".txt", ".csv"):
+                z.write(f, f.relative_to(fig_dir))
+    st.download_button("Download all figures and QC files (zip)", zipped.getvalue(),
+                       file_name=f"{alr}_figures.zip", mime="application/zip", width=BUTTON_WIDTH)
+
+    def show(name, cap):
+        path = fig_dir / name
+        if path.exists():
+            st.image(str(path), caption=cap)
+            st.download_button(f"Download {path.name}", path.read_bytes(), file_name=path.name,
+                               mime="image/png", key=f"dl_{name}")
+
     t1, t2, t3, t4 = st.tabs(["Phases", "Quality checks", "Time–depth", "Messages"])
     with t1:
         for w in res["phase_warnings"]:
