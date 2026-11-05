@@ -51,6 +51,18 @@ def browse(key):
 
 def fill_from_deployment(folder):
     """ALR4_demo layout: <serial>_ctd_data, <serial>_nav_data, uvp6_* and a figures folder."""
+    st.session_state["deployment_note"] = ""
+    if folder.name.lower().startswith("uvp6_") or all((folder / d).is_dir() for d in ("raw", "meta")):
+        # the UVP6 project itself was chosen: the ALR folders are elsewhere
+        st.session_state["project"] = str(folder)
+        st.session_state["figures"] = str(folder / "diagnostic_figures")
+        st.session_state["deployment_note"] = (
+            "This folder is the UVP6 project itself: it is used as the UVP6 project folder. "
+            "Choose the ALR CTD and NAV folders below (or choose the folder that holds the three of them).")
+        m = re.search(r"_alr(\d+)", folder.name.lower())
+        if m:
+            st.session_state["serial"] = int(m.group(1))
+        return
     subs = [p for p in folder.iterdir() if p.is_dir()]
     pick = lambda test: next((str(p) for p in subs if test(p.name.lower())), "")
     st.session_state["ctd"] = pick(lambda n: n.endswith("ctd_data")) or st.session_state.get("ctd", "")
@@ -193,6 +205,8 @@ folder_input("Deployment folder", "deployment",
              "Folder holding <serial>_ctd_data, <serial>_nav_data and the uvp6_… project",
              on_change=lambda: Path(st.session_state["deployment"]).is_dir()
              and fill_from_deployment(Path(st.session_state["deployment"])))
+if st.session_state.get("deployment_note"):
+    st.info(st.session_state["deployment_note"])
 as_path = lambda key: Path(st.session_state[key]) if st.session_state.get(key) else None
 statuses = [files_status(as_path("ctd"), "*.log"), files_status(as_path("nav"), "*.csv"),
             project_status(as_path("project")), figures_status(as_path("figures"))]
