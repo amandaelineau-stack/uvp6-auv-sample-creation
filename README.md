@@ -34,10 +34,14 @@ is sent anywhere.
    ```
    (the first one goes to the code folder of step 1). This downloads Python 3.12 and the packages
    of the pipeline, in an environment called `alr_uvp`, in a few minutes. Then close the window.
+5. **Desktop shortcut** (optional): double-click [`create_shortcut.bat`](create_shortcut.bat) in
+   the code folder. It puts an **ALR-UVP6 app** shortcut on your desktop, which starts the app
+   (it does the same as `start_app.bat`). If you move the code folder, run it again.
 
 ### Every time: run
 
-1. **Start the app**: double-click [`start_app.bat`](start_app.bat) in the code folder. A black
+1. **Start the app**: double-click the **ALR-UVP6 app** shortcut on your desktop, or
+   [`start_app.bat`](start_app.bat) in the code folder. A black
    window opens (the first time, it installs the app in about a minute), then the app opens in
    your web browser, at http://localhost:8501. Keep the black window open while you use the app;
    close it to stop the app.
