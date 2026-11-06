@@ -19,6 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import streamlit as st
+from PIL import Image
 
 import alr_data
 import alr_plots
@@ -29,7 +30,7 @@ UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
                     "livecamera", "log", "meta", "raw", "results")
 BUTTON_WIDTH = 420  # px, the Run and Download buttons
 
-st.set_page_config(page_title="ALR–UVP6 pipeline", page_icon="🌊", layout="wide")
+st.set_page_config(page_title="ALR–UVP6 pipeline", page_icon=Image.open(REPO / "alr_app.ico"), layout="wide")
 
 
 # ---------------------------------------------------------------- folders
