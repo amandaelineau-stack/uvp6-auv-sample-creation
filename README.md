@@ -1,3 +1,5 @@
+<img src="assets/alr_app.png" alt="ALR-UVP6 app icon" width="110" align="right">
+
 # ALR UVP6 Processing
 
 Scripts for processing the UVP6 data of the ALR (Autosub Long Range) platform.
