@@ -75,6 +75,7 @@ At the top of the [`run_UVP_toolbox.py`](run_UVP_toolbox.py):
   | `ALR_SERIAL_NUMBER` | ALR serial, e.g. `4` becomes `ALR004`. Names the netCDF files and the `doc/alr_meta_sn004` folder. |
   | `CRUISE` | Cruise name/project name associated with deployment, written to the sample file. |
   | `OUTPUT_DIR` | Folder for all figures. `None` asks with a dialog. |
+  | `PHASE_DETECTION` | Thresholds of the phase detection (any other `alr_data.detect_profiles` parameter can be added). The same values are drawn on the phase detection figure. |
 
   In cell 4, `assume_yes=False` asks before replacing an existing sample file;
   `True` replaces it without asking.
@@ -89,7 +90,7 @@ once instead: `python run_UVP_toolbox.py` in terminal.
 | --- | --- | --- |
 | 0. Setup | – | Imports and settings. |
 | 1. Load ALR data | CTD folder, NAV folder, figures folder | Reads and merges CTD and NAV files. |
-| 2. Profile segmentation | – | Detects profiles and transects; displays and saves two figures. |
+| 2. Profile segmentation | – | Detects profiles and transects; displays and saves two figures (see [Quality-control figures](#quality-control-figures)). |
 | 3. Build UVP project | UVP project folder | Creates the project subfolders; writes one netCDF per ALR segment. |
 | 4. UVP processing | Yes/No if a sample file exists) | Matches UVP sequences to ALR segments; writes the sample file, CTD files and diagnostic figures. |
 
@@ -114,8 +115,8 @@ Near the end of cell 4, two lines summarise CTD/NAV file and UVP image matching:
 └── CTDdata/<segment>.ctd               # one per matched segment (cell 4)
 
 <figures folder>/
-├── ALR004_profile_detection.png        # cell 2
-├── ALR004_profiles_and_transects.png   # cell 2
+├── ALR004_phase_detection.png          # cell 2
+├── ALR004_phase_sectioning.png         # cell 2
 ├── uvp_alr_timedepth.png               # cell 4, and below
 ├── uvp_alr_timedepth_fullspan.png
 ├── uvp_alr_sampling_intervals.png
@@ -125,7 +126,18 @@ Near the end of cell 4, two lines summarise CTD/NAV file and UVP image matching:
 
 Cell 1 saves the merged ALR data to `_cache_big_df.parquet` within the repository directory .
 <br>#TODO Give `_cache_big_df.parquet` a more sensible name.
-<br>#TODO Give each figure a more descriptive name, clearly describe what each figure shows.
+
+### Quality-control figures
+
+Phases are coloured as in the documentation: d downcast, u upcast, t transect,
+s surface transect, x transition.
+
+| Figure | What it shows | What to check |
+| --- | --- | --- |
+| `ALR004_phase_detection.png` | Depth, the two detection criteria (smoothed vertical velocity, and M = −pitch × vertical velocity) with their thresholds as grey bands, the pitch, and the profile numbering before/after the duration and back-fill filters. | Why a record got its phase; whether the thresholds suit the deployment. |
+| `ALR004_phase_sectioning.png` | The deployment coloured by phase, the count of each phase type, and one block per phase (one phase = one netCDF file = one sample), with the segment boundaries. | Each dive split into a downcast and an upcast, no missed profile, no fragmented transect. |
+| `uvp_alr_timedepth.png`, `…_fullspan.png`, `daily_plots/`, `overview_plots/` | UVP (dots) and ALR (line) depth, the UVP − ALR depth difference (10 s medians), and, in `…_fullspan.png`, the ALR → UVP clock offset of each 31 × 10 s window, coloured by r²; the median over reliable windows (r² ≥ 0.9) is printed and drawn. | A constant depth difference points to a pressure offset, a difference growing with depth to a scale difference, and a non-zero median offset to a clock offset. |
+| `uvp_alr_sampling_intervals.png` | Distribution of the time between two UVP images and two ALR records. | Gaps or irregular sampling. |
 ## Re-running
 
 - **After editing code in `main/` or `UVP_toolbox_Python/`**, restart the

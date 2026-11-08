@@ -19,6 +19,10 @@ ALR_SERIAL_NUMBER = 4
 ALR_SERIAL = f"ALR{ALR_SERIAL_NUMBER:03d}"
 CRUISE = "DY180"
 OUTPUT_DIR = None # Output for figures; set here to skip prompts asking for figure directory
+# Phase detection thresholds, used by the detection and shown on its figure;
+# any other alr_data.detect_profiles parameter can be added here
+PHASE_DETECTION = dict(gradient_thresholds=[0.05, -0.05],
+                       cust_gradient_thresholds=[0.005, -0.005])
 
 prompter = TkPrompter()
 # ==========
@@ -51,15 +55,15 @@ big_df.write_parquet(REPO / "_cache_big_df.parquet")
 # ==========
 # %% 2. Profile Segmentation
 # ==========
-df, profiles_df = alr_data.detect_profiles(big_df)
+df, profiles_df = alr_data.detect_profiles(big_df, **PHASE_DETECTION)
 df = alr_data.attach_profiles(df, profiles_df)
 
-fig, _ = alr_plots.plot_profile_detection(profiles_df, show=False)
-fig.savefig(f"{out_dir}\\{ALR_SERIAL}_profile_detection.png",dpi=150)
+fig, _ = alr_plots.plot_phase_detection(profiles_df, **PHASE_DETECTION, show=False)
+fig.savefig(Path(out_dir) / f"{ALR_SERIAL}_phase_detection.png", dpi=150)
 plt.show()
 
-fig, _ = alr_plots.plot_profiles_and_transects(df, show=False)
-fig.savefig(f"{out_dir}\\{ALR_SERIAL}_profiles_and_transects.png",dpi=150)
+fig, _ = alr_plots.plot_phase_sectioning(df, show=False)
+fig.savefig(Path(out_dir) / f"{ALR_SERIAL}_phase_sectioning.png", dpi=150)
 plt.show()
 
 # ==========
