@@ -1,4 +1,4 @@
-"""Profile/transect detection for ALR platform data.
+"""Profile/transect detection for AUV platform data.
 
 Standalone implementation of the `find_profiles` algorithm: given a dataframe of
 time and depth (or pressure) measurements, it identifies vertical profiles
@@ -6,8 +6,8 @@ time and depth (or pressure) measurements, it identifies vertical profiles
 custom column such as pitch.
 
 Usage:
-    import find_profiles_ALR as fpALR
-    profiles_df = fpALR.find_profiles(df, gradient_thresholds=[0.05, -0.05], ...)
+    import find_profiles as fp
+    profiles_df = fp.find_profiles(df, gradient_thresholds=[0.05, -0.05], ...)
 """
 
 import polars as pl
@@ -100,7 +100,7 @@ def find_profiles(
         - 'smooth_grad': Median-filtered vertical velocity
         - 'is_profile': Boolean indicating if a point belongs to a profile
         - 'profile_num': Unique identifier for each identified profile (0 for non-profile points)
-        - NEW : 'phase': Developed for ALR data, indicates the phase of the platform, 0 for downcast, 1 for upcast, 2 for transect
+        - NEW : 'phase': Developed for AUV data, indicates the phase of the platform, 0 for downcast, 1 for upcast, 2 for transect
 
     Notes
     -----

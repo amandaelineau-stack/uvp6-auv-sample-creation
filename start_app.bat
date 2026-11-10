@@ -1,11 +1,11 @@
 @echo off
-rem Starts the ALR-UVP6 app in the web browser (double-click this file).
-rem Uses the conda environment alr_uvp when Miniconda or Anaconda is installed
+rem Starts the AUV-UVP6 app in the web browser (double-click this file).
+rem Uses the conda environment auv_uvp (or alr_uvp, its former name) when Miniconda or Anaconda is installed
 rem in one of the usual folders, otherwise the Python found on the PATH.
 cd /d "%~dp0"
 for %%C in ("%USERPROFILE%\miniconda3" "%USERPROFILE%\anaconda3" "%LOCALAPPDATA%\miniconda3" "%ProgramData%\miniconda3" "%ProgramData%\anaconda3") do (
     if exist "%%~C\condabin\conda.bat" (
-        call "%%~C\condabin\conda.bat" activate alr_uvp
+        call "%%~C\condabin\conda.bat" activate auv_uvp 2>nul || call "%%~C\condabin\conda.bat" activate alr_uvp
         goto run
     )
 )

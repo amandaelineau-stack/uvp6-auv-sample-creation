@@ -1,14 +1,14 @@
-"""Diagnostics from ``uvp6_create_samples_alr.m``: UVP-vs-ALR time-depth
+"""Diagnostics from ``uvp6_create_samples_alr.m``: UVP-vs-AUV time-depth
 comparison plots, the sliding r² clock-offset estimate, and sampling-interval
 statistics.
 
 Currently writes these figures:
 
-    <outdir>/uvp_alr_timedepth.png                     2 panels, linear axes
-    <outdir>/uvp_alr_timedepth_fullspan.png            3 panels incl. best offset
-    <outdir>/daily_plots/uvp_alr_timedepth_<date>.png  one per day with data
-    <outdir>/overview_plots/uvp_alr_timedepth_all_days.png
-    <outdir>/uvp_alr_sampling_intervals.png
+    <outdir>/uvp_auv_timedepth.png                     2 panels, linear axes
+    <outdir>/uvp_auv_timedepth_fullspan.png            3 panels incl. best offset
+    <outdir>/daily_plots/uvp_auv_timedepth_<date>.png  one per day with data
+    <outdir>/overview_plots/uvp_auv_timedepth_all_days.png
+    <outdir>/uvp_auv_sampling_intervals.png
 """
 
 from __future__ import annotations
@@ -36,9 +36,9 @@ __all__ = [
     "sampling_interval_diagnostics",
 ]
 
-# MATLAB's default colour order: series 1 (UVP) blue, series 2 (ALR) orange.
+# MATLAB's default colour order: series 1 (UVP) blue, series 2 (AUV) orange.
 C_UVP = "#0072BD"
-C_ALR = "#D95319"
+C_AUV = "#D95319"
 C_LAG = "#FF0000"
 C_GAP = "#b3261e"   # periods without UVP image, as on the QC coverage map
 # Lag windows whose best r² is below this are flat-depth stretches: their lag is noise
@@ -90,7 +90,7 @@ class BinnedDepths:
     edges: np.ndarray
     centers: np.ndarray
     uvp_med: np.ndarray
-    alr_med: np.ndarray
+    auv_med: np.ndarray
     abs_diff: np.ndarray
     rel_diff: np.ndarray
 
@@ -117,15 +117,15 @@ def _bin_median(t: np.ndarray, z: np.ndarray, edges: np.ndarray, nb: int) -> np.
     return out
 
 
-def bin_depths(t_uvp, z_uvp, t_alr, z_alr, bin_seconds: int = 10) -> BinnedDepths:
-    """Median depth per ``bin_seconds`` bin across the joint UVP/ALR extent,
+def bin_depths(t_uvp, z_uvp, t_auv, z_auv, bin_seconds: int = 10) -> BinnedDepths:
+    """Median depth per ``bin_seconds`` bin across the joint UVP/AUV extent,
     plus absolute and relative (% of UVP) differences."""
     t_uvp = _as_times(t_uvp)
     z_uvp = np.asarray(z_uvp, dtype=float).ravel()
-    t_alr = _as_times(t_alr)
-    z_alr = np.asarray(z_alr, dtype=float).ravel()
+    t_auv = _as_times(t_auv)
+    z_auv = np.asarray(z_auv, dtype=float).ravel()
 
-    cands = [ft for ft in (finite_times(t_uvp), finite_times(t_alr)) if ft.size]
+    cands = [ft for ft in (finite_times(t_uvp), finite_times(t_auv)) if ft.size]
     if not cands:
         return BinnedDepths(_EMPTY_T.copy(), _EMPTY_T.copy(), _EMPTY_F.copy(), _EMPTY_F.copy(), _EMPTY_F.copy(), _EMPTY_F.copy())
     t_min = min(ft.min() for ft in cands)
@@ -138,12 +138,12 @@ def bin_depths(t_uvp, z_uvp, t_alr, z_alr, bin_seconds: int = 10) -> BinnedDepth
     nb = n_edges - 1
 
     uvp_med = _bin_median(t_uvp, z_uvp, edges, nb)
-    alr_med = _bin_median(t_alr, z_alr, edges, nb)
-    abs_diff = np.abs(uvp_med - alr_med)
+    auv_med = _bin_median(t_auv, z_auv, edges, nb)
+    abs_diff = np.abs(uvp_med - auv_med)
     with np.errstate(divide="ignore", invalid="ignore"):
         rel_diff = 100.0 * (abs_diff / uvp_med)
     rel_diff[uvp_med == 0] = np.nan
-    return BinnedDepths(edges, centers, uvp_med, alr_med, abs_diff, rel_diff)
+    return BinnedDepths(edges, centers, uvp_med, auv_med, abs_diff, rel_diff)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ def bin_depths(t_uvp, z_uvp, t_alr, z_alr, bin_seconds: int = 10) -> BinnedDepth
 def lag_sweep(binned: BinnedDepths, window_bins: int = 31, search_seconds: float = 60.0,
               default_bin_seconds: float = 10.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """For each ``window_bins``-wide window of jointly-valid bins, the lag (in
-    bins, converted to seconds) that maximises r² between UVP and ALR depth.
+    bins, converted to seconds) that maximises r² between UVP and AUV depth.
 
     Returns ``(window_centre_times, best_lag_seconds, best_r2)``; all empty
     when fewer than ``window_bins`` bins are valid on both sides.
@@ -161,11 +161,11 @@ def lag_sweep(binned: BinnedDepths, window_bins: int = 31, search_seconds: float
     empty = (_EMPTY_T.copy(), _EMPTY_F.copy(), _EMPTY_F.copy())
     if binned.empty:
         return empty
-    valid = np.isfinite(binned.uvp_med) & np.isfinite(binned.alr_med)
+    valid = np.isfinite(binned.uvp_med) & np.isfinite(binned.auv_med)
     if int(valid.sum()) < window_bins:
         return empty
     u = binned.uvp_med[valid]
-    a = binned.alr_med[valid]
+    a = binned.auv_med[valid]
     t = binned.centers[valid]
 
     if t.size >= 2:
@@ -229,16 +229,16 @@ def _with_gaps(t: np.ndarray, z: np.ndarray, max_gap_s: float = 60.0) -> tuple[n
             np.insert(np.asarray(z, dtype=float), breaks, np.nan))
 
 
-def _plot_top(ax, start, end, uvp_time_series, uvp_depth_series, have_alr, t_alr, z_alr,
-              uvp_ms=2, alr_lw=1.0, legend=True, title=None):
-    """ALR depth as a line, UVP image depths as dots on top of it, so that both
+def _plot_top(ax, start, end, uvp_time_series, uvp_depth_series, have_auv, t_auv, z_auv,
+              uvp_ms=2, auv_lw=1.0, legend=True, title=None):
+    """AUV depth as a line, UVP image depths as dots on top of it, so that both
     stay visible where they agree."""
-    if have_alr:
-        sel_a = _in_window(t_alr, start, end)
+    if have_auv:
+        sel_a = _in_window(t_auv, start, end)
         if sel_a.any():
-            order = np.argsort(t_alr[sel_a], kind="stable")
-            ta, za = _with_gaps(t_alr[sel_a][order], z_alr[sel_a][order])
-            ax.plot(ta, za, "-", lw=alr_lw, color=C_ALR, label="ALR", zorder=1)
+            order = np.argsort(t_auv[sel_a], kind="stable")
+            ta, za = _with_gaps(t_auv[sel_a][order], z_auv[sel_a][order])
+            ax.plot(ta, za, "-", lw=auv_lw, color=C_AUV, label="AUV", zorder=1)
     added = False
     for tt, zz in zip(uvp_time_series, uvp_depth_series):
         tt = _as_times(tt)
@@ -259,7 +259,7 @@ def _plot_top(ax, start, end, uvp_time_series, uvp_depth_series, have_alr, t_alr
         ax.set_title(title, loc="left")
 
 
-def _plot_bottom(ax, start, end, centers, depth_diff, lw=1.0, ylabel="UVP − ALR depth (m)"):
+def _plot_bottom(ax, start, end, centers, depth_diff, lw=1.0, ylabel="UVP − AUV depth (m)"):
     """Signed depth difference (10 s medians) on a single axis, with zero marked."""
     ax.grid(True, color="0.9")
     ax.axhline(0, color="0.4", lw=0.8)
@@ -289,14 +289,14 @@ def _time_axis(ax):
 
 
 def plot_one_day(ax_top, ax_bot, day_start, day_end, uvp_time_series, uvp_depth_series,
-                 have_alr, t_alr, z_alr, centers, depth_diff, title=None, gaps=()):
-    """The MATLAB ``plot_one_day`` helper: depths on top, UVP − ALR depth
+                 have_auv, t_auv, z_auv, centers, depth_diff, title=None, gaps=()):
+    """The MATLAB ``plot_one_day`` helper: depths on top, UVP − AUV depth
     difference below, x axes linked; periods without UVP image shaded red."""
     if title is None:
-        title = f"UVP & ALR depth – {_ts(day_start):%Y-%m-%d}"
+        title = f"UVP & AUV depth – {_ts(day_start):%Y-%m-%d}"
     _shade_gaps(ax_top, gaps, day_start, day_end, label=True)
     _shade_gaps(ax_bot, gaps, day_start, day_end)
-    _plot_top(ax_top, day_start, day_end, uvp_time_series, uvp_depth_series, have_alr, t_alr, z_alr,
+    _plot_top(ax_top, day_start, day_end, uvp_time_series, uvp_depth_series, have_auv, t_auv, z_auv,
               title=title)
     _plot_bottom(ax_bot, day_start, day_end, centers, depth_diff)
     ax_bot.set_title("Depth difference, 10 s medians: constant = pressure offset, growing with depth = "
@@ -312,7 +312,7 @@ def plot_one_day(ax_top, ax_bot, day_start, day_end, uvp_time_series, uvp_depth_
 # ---------------------------------------------------------------------------
 
 def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Sequence,
-                         alr_time=None, alr_depth=None, verbose: bool = True, gaps=()) -> dict[str, Path]:
+                         auv_time=None, auv_depth=None, verbose: bool = True, gaps=()) -> dict[str, Path]:
     """Write every time-depth diagnostic figure and return their paths.
 
     ``gaps``: (start, end) datetime64 pairs of the periods without UVP image
@@ -327,13 +327,13 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
         d.mkdir(parents=True, exist_ok=True)
 
     t_uvp, z_uvp = _concat_series(uvp_time_series, uvp_depth_series)
-    have_alr = alr_time is not None and np.asarray(alr_time).size > 0
-    t_alr = _as_times(alr_time) if have_alr else _EMPTY_T.copy()
-    z_alr = np.asarray(alr_depth, dtype=float).ravel() if have_alr else _EMPTY_F.copy()
+    have_auv = auv_time is not None and np.asarray(auv_time).size > 0
+    t_auv = _as_times(auv_time) if have_auv else _EMPTY_T.copy()
+    z_auv = np.asarray(auv_depth, dtype=float).ravel() if have_auv else _EMPTY_F.copy()
 
-    binned = bin_depths(t_uvp, z_uvp, t_alr, z_alr)
+    binned = bin_depths(t_uvp, z_uvp, t_auv, z_auv)
     centers = binned.centers
-    depth_diff = binned.uvp_med - binned.alr_med  # signed, so that a bias shows
+    depth_diff = binned.uvp_med - binned.auv_med  # signed, so that a bias shows
     written: dict[str, Path] = {}
 
     # ---- data extent (figures 1-2) and whole days (daily figures)
@@ -341,8 +341,8 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
         ft = finite_times(centers)
     elif t_uvp.size:
         ft = finite_times(t_uvp)
-    elif t_alr.size:
-        ft = finite_times(t_alr)
+    elif t_auv.size:
+        ft = finite_times(t_auv)
     else:
         raise ValueError("No time data to plot.")
     pad = max((ft.max() - ft.min()) // 50, np.timedelta64(1, "m"))
@@ -354,21 +354,21 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     # ---- (1) combined 2-panel figure
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7.5), constrained_layout=True)
     plot_one_day(ax1, ax2, data_start, data_end, uvp_time_series, uvp_depth_series,
-                 have_alr, t_alr, z_alr, centers, depth_diff, title=f"UVP & ALR depth – {span}", gaps=gaps)
-    fig.canvas.manager.set_window_title("UVP & ALR depth")
-    out = outdir / "uvp_alr_timedepth.png"
+                 have_auv, t_auv, z_auv, centers, depth_diff, title=f"UVP & AUV depth – {span}", gaps=gaps)
+    fig.canvas.manager.set_window_title("UVP & AUV depth")
+    out = outdir / "uvp_auv_timedepth.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
     written["timedepth"] = out
     if verbose:
         print(f"Saved diagnostic plot to: {out}")
 
-    lag_times, lag_best_sec, lag_r2 = lag_sweep(binned) if have_alr else (_EMPTY_T.copy(), _EMPTY_F.copy(), _EMPTY_F.copy())
+    lag_times, lag_best_sec, lag_r2 = lag_sweep(binned) if have_auv else (_EMPTY_T.copy(), _EMPTY_F.copy(), _EMPTY_F.copy())
 
     # ---- (2) full-span 3-panel figure, with the clock offset
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10.5), constrained_layout=True)
     plot_one_day(ax1, ax2, data_start, data_end, uvp_time_series, uvp_depth_series,
-                 have_alr, t_alr, z_alr, centers, depth_diff, title=f"UVP & ALR depth – {span}", gaps=gaps)
+                 have_auv, t_auv, z_auv, centers, depth_diff, title=f"UVP & AUV depth – {span}", gaps=gaps)
     ax3.grid(True, color="0.9")
     _shade_gaps(ax3, gaps, data_start, data_end)
     reliable = lag_r2 >= LAG_R2_MIN
@@ -384,16 +384,16 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
             ax3.axhline(median_offset, color=C_LAG, lw=1.2, label=f"median: {median_offset:+.0f} s")
             offset_text = f"median {median_offset:+.0f} s over {int(reliable.sum())} reliable windows"
             if verbose:
-                print(f"ALR -> UVP clock offset: {offset_text}")
+                print(f"AUV -> UVP clock offset: {offset_text}")
         ax3.legend(loc="upper right", fontsize=8, frameon=False)
     ax3.set_ylabel("Best offset (s)")
-    ax3.set_title(f"Clock offset ALR → UVP (lag that best aligns both depth records, 31 × 10 s windows): "
+    ax3.set_title(f"Clock offset AUV → UVP (lag that best aligns both depth records, 31 × 10 s windows): "
                   f"{offset_text}", loc="left")
     ax3.set_xlim(_pydt(data_start), _pydt(data_end))
     ax3.sharex(ax2)
     _time_axis(ax3)
-    fig.canvas.manager.set_window_title("UVP & ALR depth and clock offset")
-    out = outdir / "uvp_alr_timedepth_fullspan.png"
+    fig.canvas.manager.set_window_title("UVP & AUV depth and clock offset")
+    out = outdir / "uvp_auv_timedepth_fullspan.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
     written["fullspan"] = out
@@ -404,7 +404,7 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     if not binned.empty:
         day_starts = np.unique(_day_floor(centers[~np.isnat(centers)]))
     else:
-        cands = np.concatenate([finite_times(t_uvp), finite_times(t_alr)])
+        cands = np.concatenate([finite_times(t_uvp), finite_times(t_auv)])
         day_starts = np.unique(_day_floor(cands))
 
     one_day = np.timedelta64(1, "D")
@@ -412,14 +412,14 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     for ds in day_starts:
         de = ds + one_day
         has_uvp = t_uvp.size > 0 and bool(((t_uvp >= ds) & (t_uvp < de)).any())
-        has_alr = have_alr and bool(((t_alr >= ds) & (t_alr < de)).any())
+        has_auv = have_auv and bool(((t_auv >= ds) & (t_auv < de)).any())
         has_bins = centers.size > 0 and bool(((centers >= ds) & (centers < de) & ~np.isnan(depth_diff)).any())
-        if not (has_uvp or has_alr or has_bins):
+        if not (has_uvp or has_auv or has_bins):
             continue
         fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(12, 7.5), constrained_layout=True)
         plot_one_day(ax_top, ax_bot, ds, de, uvp_time_series, uvp_depth_series,
-                     have_alr, t_alr, z_alr, centers, depth_diff, gaps=gaps)
-        out = daily_dir / f"uvp_alr_timedepth_{_ts(ds):%Y-%m-%d}.png"
+                     have_auv, t_auv, z_auv, centers, depth_diff, gaps=gaps)
+        out = daily_dir / f"uvp_auv_timedepth_{_ts(ds):%Y-%m-%d}.png"
         fig.savefig(out, dpi=150)
         plt.close(fig)
         daily.append(out)
@@ -443,20 +443,20 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
             ax_bot = fig.add_subplot(gs[2 * r + 1, c])
             _shade_gaps(ax_top, gaps, ds, de)
             _shade_gaps(ax_bot, gaps, ds, de)
-            _plot_top(ax_top, ds, de, uvp_time_series, uvp_depth_series, have_alr, t_alr, z_alr,
-                      uvp_ms=1, alr_lw=0.75, legend=(i == 0), title=f"{_ts(ds):%Y-%m-%d}")
+            _plot_top(ax_top, ds, de, uvp_time_series, uvp_depth_series, have_auv, t_auv, z_auv,
+                      uvp_ms=1, auv_lw=0.75, legend=(i == 0), title=f"{_ts(ds):%Y-%m-%d}")
             ax_top.set_xlabel("")
             # tiles are narrow: a few concise time ticks instead of hourly date stamps
             locator = mdates.AutoDateLocator(minticks=3, maxticks=6)
             ax_top.xaxis.set_major_locator(locator)
             ax_top.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
-            _plot_bottom(ax_bot, ds, de, centers, depth_diff, lw=0.75, ylabel="UVP − ALR (m)")
+            _plot_bottom(ax_bot, ds, de, centers, depth_diff, lw=0.75, ylabel="UVP − AUV (m)")
             ax_top.set_xlim(_pydt(ds), _pydt(de))
             ax_bot.set_xlim(_pydt(ds), _pydt(de))
             ax_bot.sharex(ax_top)
             ax_bot.set_xlabel("")
             ax_bot.tick_params(axis="x", labelbottom=False)
-        out = overview_dir / "uvp_alr_timedepth_all_days.png"
+        out = overview_dir / "uvp_auv_timedepth_all_days.png"
         fig.savefig(out, dpi=200)
         plt.close(fig)
         written["overview"] = out
@@ -489,18 +489,18 @@ def _report(label: str, x: np.ndarray) -> None:
         print(f"{label} median dt = {np.nanmedian(x):.3f} s (mean = {np.nanmean(x):.3f} s, N={x.size})")
 
 
-def sampling_interval_diagnostics(outdir, uvp_time_series: Sequence, alr_time=None) -> dict:
+def sampling_interval_diagnostics(outdir, uvp_time_series: Sequence, auv_time=None) -> dict:
     """Print median/mean sampling intervals and save the histogram figure."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     print("\n--- Sampling interval diagnostics ---")
     uvp_intervals = _intervals(uvp_time_series)
     _report("UVP", uvp_intervals)
-    alr_intervals = _intervals([alr_time]) if alr_time is not None and np.asarray(alr_time).size > 1 else _EMPTY_F.copy()
-    _report("ALR", alr_intervals)
+    auv_intervals = _intervals([auv_time]) if auv_time is not None and np.asarray(auv_time).size > 1 else _EMPTY_F.copy()
+    _report("AUV", auv_intervals)
 
     fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    for x, label, color in ((uvp_intervals, "UVP", C_UVP), (alr_intervals, "ALR", C_ALR)):
+    for x, label, color in ((uvp_intervals, "UVP", C_UVP), (auv_intervals, "AUV", C_AUV)):
         x = x[np.isfinite(x)]
         if x.size == 0:
             continue
@@ -511,8 +511,8 @@ def sampling_interval_diagnostics(outdir, uvp_time_series: Sequence, alr_time=No
     ax.set_ylabel("Count")
     if ax.get_legend_handles_labels()[0]:
         ax.legend()
-    ax.set_title("UVP vs ALR sampling interval distribution")
-    out = outdir / "uvp_alr_sampling_intervals.png"
+    ax.set_title("UVP vs AUV sampling interval distribution")
+    out = outdir / "uvp_auv_sampling_intervals.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    return {"uvp_intervals": uvp_intervals, "alr_intervals": alr_intervals, "figure": out}
+    return {"uvp_intervals": uvp_intervals, "auv_intervals": auv_intervals, "figure": out}

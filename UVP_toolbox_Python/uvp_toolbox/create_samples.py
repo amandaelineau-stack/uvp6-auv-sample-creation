@@ -3,7 +3,7 @@
 Translation of ``UVP6_samples_creation/uvp6_create_samples_alr.m`` — the
 driver that reads each UVP6 sequence, finds the usable depth from the
 instrument's black-image noise, matches sequences to the vehicle metadata
-(SeaExplorer, SeaGlider, BGC-Argo float or ALR), writes one CTD file per
+(SeaExplorer, SeaGlider, BGC-Argo float or AUV), writes one CTD file per
 sample, writes ``meta/uvp6_header_<project>.txt`` and produces the diagnostic
 figures.
 
@@ -24,8 +24,8 @@ import numpy as np
 
 from .detection_vector_meta_file import detection_vector_meta_file
 from .diagnostics import make_timedepth_plots, sampling_interval_diagnostics
-from .qc import coverage_gaps, run_alr_qc
-from .get_meta_from_vector_meta_file import get_meta_alr, get_meta_from_vector_meta_file, parse_alr_filename
+from .qc import coverage_gaps, run_auv_qc
+from .get_meta_from_vector_meta_file import get_meta_auv, get_meta_from_vector_meta_file, parse_auv_filename
 from .matlab_compat import datestr_yyyymmdd_HHMMSS, num2str
 from .usable_depth_limit import usable_depth_limit
 from .uvp6_io import (
@@ -51,7 +51,7 @@ __all__ = [
     "write_sample_file",
 ]
 
-VECTOR_TYPES = ("SeaExplorer", "SeaGlider", "float", "ALR")
+VECTOR_TYPES = ("SeaExplorer", "SeaGlider", "float", "AUV")
 
 SAMPLE_FILE_COLUMNS = [
     "cruise", "ship", "filename", "profileid",
@@ -148,8 +148,8 @@ class SampleRow:
 def detect_vector_type(project_folder, prompter: Optional[Prompter] = None) -> str:
     """Platform from the project folder *name* (MATLAB tests the whole path):
     ``sea`` -> SeaExplorer, ``SG`` -> SeaGlider, ``WMO`` -> float, or an
-    ``alr_meta_sn*`` folder under ``meta`` (or ``doc`` in older projects) -> ALR.  Otherwise asks ``prompter``
-    (error when no prompter is given)."""
+    ``auv_meta_*`` folder under ``meta`` (``alr_meta_sn*`` in older projects, under ``meta`` or ``doc``)
+    -> AUV.  Otherwise asks ``prompter`` (error when no prompter is given)."""
     project_folder = Path(project_folder)
     name = project_folder.name
     if "sea" in name:
@@ -158,18 +158,19 @@ def detect_vector_type(project_folder, prompter: Optional[Prompter] = None) -> s
         return "SeaGlider"
     if "WMO" in name:
         return "float"
-    if any((project_folder / "meta").glob("alr_meta_sn*")) or any((project_folder / "doc").glob("alr_meta_sn*")):
-        return "ALR"
-    warnings.warn("Only Seaexplorer, Seaglider, Float, and ALR project types are supported")
+    meta, doc = project_folder / "meta", project_folder / "doc"
+    if any(meta.glob("auv_meta_*")) or any(meta.glob("alr_meta_sn*")) or any(doc.glob("alr_meta_sn*")):
+        return "AUV"
+    warnings.warn("Only Seaexplorer, Seaglider, Float, and AUV project types are supported")
     prompter = prompter or NullPrompter()
     answer = prompter.choose_option(
         "UVP project type",
-        "Is it a Seaexplorer [se], Seaglider [sg], float [fl], " 
-        "or ALR [alr] project?",
-        ["se","sg","fl","alr"],"alr")
+        "Is it a Seaexplorer [se], Seaglider [sg], float [fl], "
+        "or AUV [auv] project?",
+        ["se","sg","fl","auv"],"auv")
     if answer is None:
         raise RuntimeError("ERROR: Process has been aborted")
-    mapping = {"": "ALR", "se": "SeaExplorer", "sg": "SeaGlider", "fl": "float", "alr": "ALR"}
+    mapping = {"": "AUV", "se": "SeaExplorer", "sg": "SeaGlider", "fl": "float", "auv": "AUV", "alr": "AUV"}
     if answer not in mapping:
         raise ValueError("ERROR : The project is not a valid platform type")
     return mapping[answer]
@@ -318,9 +319,9 @@ def create_samples(
     ``deep_black_limit`` (depth below which the black level is instrumental,
     100 m).  ``cruise`` overrides ``config/cruise_info.txt``; ``plots_dir``
     is asked for with the ``prompter`` when not given.  ``qc_min_images`` is the
-    sample size below which the quality checks report a sample as small (ALR only).
+    sample size below which the quality checks report a sample as small (AUV only).
     ``depth_integration`` (m) and ``time_integration`` (s) are written to the
-    ``integrationtime`` column of the ALR samples: depth-integrated (P) for
+    ``integrationtime`` column of the AUV samples: depth-integrated (P) for
     downcasts, upcasts and transitions, time-integrated (T) for transects and
     surface transects, as in the DY180 sample file (#16).
     """
@@ -339,7 +340,7 @@ def create_samples(
             raise RuntimeError("ERROR: No output folder is selected")
 
     print(_RULE)
-    print("------------- UVP6 ALR sample creator --------------------")
+    print("------------- UVP6 AUV sample creator --------------------")
     print(_RULE)
     print("WARNING : Python port of the 'UVP_Toolbox' https://github.com/ecotaxa/UVP_toolbox by ccatalano")
     print("Consult the README.md file for recommended project structure.")
@@ -386,10 +387,10 @@ def create_samples(
     ref_time_list = np.array([s.stop_time if vector_type == "float" else s.start_time for s in seqs], dtype="datetime64[ns]")
 
     rows: list[SampleRow] = []
-    alr_time = alr_depth = None
+    auv_time = auv_depth = None
     res = None
     qc_samples: list[tuple[str, str, int]] = []  # (sample, phase letter, images) for the quality checks
-    if vector_type != "ALR":
+    if vector_type != "AUV":
         match = get_meta_from_vector_meta_file(
             vector_type, meta_data_folder, project_folder, ref_time_list,
             [s.name for s in seqs], [s.profile_type for s in seqs], cruise_name)
@@ -402,10 +403,10 @@ def create_samples(
                 argoid=match.vector_filenames[i], pixelsize=s.pixelsize, sampledatetime=s.start_time,
             ))
     else:
-        res = get_meta_alr(meta_data_folder, project_folder, uvp_time_series, verbose=True)
+        res = get_meta_auv(meta_data_folder, project_folder, uvp_time_series, verbose=True)
         for i in range(len(res.sample_names)):
             s = seqs[int(res.assigned_uvp_seq_idx[i])]
-            _, seg_id, letter = parse_alr_filename(res.vector_filenames[i])
+            _, seg_id, letter = parse_auv_filename(res.vector_filenames[i])
             # Profiles and transitions cross the water column (depth integration);
             # transects stay at one depth (time integration), as for DY180 (#16).
             if letter in ("d", "u", "x"):
@@ -422,7 +423,7 @@ def create_samples(
                 argoid=res.vector_filenames[i], pixelsize=s.pixelsize, sampledatetime=res.start_time[i],
             ))
 
-        print(f"Matching UVP data times were not found for {res.skipped_count} of {res.total_alr} CTD/NAV files.")
+        print(f"Matching UVP data times were not found for {res.skipped_count} of {res.total_auv} CTD/NAV files.")
         # Flag unmatched images
         matched = [np.zeros(s.time.size, dtype=bool) for s in seqs]
         for seq_i, first, last in zip(res.assigned_uvp_seq_idx, res.start_idx, res.end_idx):
@@ -435,7 +436,7 @@ def create_samples(
             print(f"WARNING : {len(res.ctd_failures)} CTD file(s) could not be written:")
             for fname, err in res.ctd_failures[:10]:
                 print(f"    {fname}: {err}")
-        alr_time, alr_depth = res.alr_plot_time, res.alr_plot_depth
+        auv_time, auv_depth = res.auv_plot_time, res.auv_plot_depth
 
     print(_RULE)
 
@@ -453,16 +454,16 @@ def create_samples(
             if res is not None:  # periods without UVP image, shaded on the time-depth figures
                 t_uvp = np.concatenate([np.asarray(t, dtype="datetime64[ns]").ravel() for t in uvp_time_series])
                 gaps = [(g.start, g.end) for g in coverage_gaps(res.phases, t_uvp)[0]]
-            make_timedepth_plots(outdir, uvp_time_series, uvp_depth_series, alr_time, alr_depth, gaps=gaps)
+            make_timedepth_plots(outdir, uvp_time_series, uvp_depth_series, auv_time, auv_depth, gaps=gaps)
         except Exception as exc:  # the MATLAB block is wrapped the same way
             print(f"Plotting skipped: {exc}")
         try:
-            sampling_interval_diagnostics(outdir, uvp_time_series, alr_time)
+            sampling_interval_diagnostics(outdir, uvp_time_series, auv_time)
         except Exception as exc:
             print(f"Sampling interval diagnostics skipped: {exc}")
         if res is not None:
             try:
-                run_alr_qc(outdir, uvp_time_series, uvp_depth_series, res, qc_samples, min_images=qc_min_images)
+                run_auv_qc(outdir, uvp_time_series, uvp_depth_series, res, qc_samples, min_images=qc_min_images)
             except Exception as exc:
                 print(f"Quality checks skipped: {exc}")
 
