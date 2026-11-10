@@ -52,7 +52,7 @@ the top, and click **Run Cell** above each `# %%`, in order:
 
 | Cell | Asks for | What happens |
 | --- | --- | --- |
-| 1. Load and parse the AUV data | ALR CTD and NAV folders (or CSV folder), figures folder | Reads and merges the AUV data files. |
+| 1. Load and parse the AUV data | ALR CTD and NAV folders (or the CSV file), figures folder | Reads and merges the AUV data files. |
 | 2. Identify the AUV phases | – | Detects the phases, saves two figures, prints the phase checks. |
 | 3. Generate one netCDF file per AUV phase | UVP6 project folder | Checks the project folders, writes one netCDF per phase. |
 | 4. Generate the UVPapp sample file | Yes/No if a sample file exists | Matches the UVP6 images to the phases, writes the sample file, the CTD files and the figures. |
@@ -65,7 +65,7 @@ Close UVPapp before running cell 4.
 <deployment folder>/                         e.g. ALR4_demo
 ├── ALR004_ctd_data/*.log                    ALR CTD files
 ├── ALR004_nav_data/*.csv                    ALR navigation files
-│   (other AUVs: <AUV name>_csv_data/*.csv   simple CSV files)
+│   (other AUVs: one <AUV name>.csv file     simple CSV file, instead of the two ALR folders)
 ├── diagnostic_figures/                      figures and quality checks (written)
 └── uvp6_<sn>_<date>_<cruise>_<platform>/    complete UVPapp project, sequences merged in UVPapp
     ├── raw/<yyyymmdd-HHMMSS>/               UVP6 sequence (read)

@@ -17,10 +17,12 @@ buttons. Select the `auv_uvp` environment as the Python interpreter.
 merged; subfolders are ignored. In future releases, the ALR CTD and NAV data will come in a single
 netCDF file.
 
-**Other AUVs (or ALR data exported to CSV)**: one folder of simple CSV files (`AUV_DATA_FORMAT =
+**Other AUVs (or ALR data exported to CSV)**: one or more simple CSV files (`AUV_DATA_FORMAT =
 "CSV"` in the script, "Simple CSV files (any AUV)" in the app). Each file has a header line and the
 columns below; names are case-insensitive, other columns are ignored, several files are merged and
-sorted by time.
+sorted by time. In the app, **Browse…** chooses the CSV file (or type the path of a folder: every
+`.csv` file in it is read); a single CSV file placed directly in the deployment folder, or a
+`<AUV name>_csv_data` folder, is found automatically. In the script, cell 1 asks for the file(s).
 
 | Column | Unit | |
 | --- | --- | --- |

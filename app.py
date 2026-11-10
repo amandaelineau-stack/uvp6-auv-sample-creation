@@ -36,14 +36,19 @@ st.set_page_config(page_title="AUV–UVP6 pipeline", page_icon=Image.open(REPO /
 
 # ---------------------------------------------------------------- folders
 def browse(key):
-    """Folder dialog of this computer (the app runs locally)."""
+    """Folder dialog of this computer (the app runs locally); a file dialog for the CSV file."""
     import tkinter as tk
     from tkinter import filedialog
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", 1)
     start = st.session_state.get(key) or str(Path.home())
-    path = filedialog.askdirectory(initialdir=start, parent=root)
+    if key == "csv":
+        start = str(Path(start).parent) if Path(start).is_file() else start
+        path = filedialog.askopenfilename(initialdir=start, parent=root, title="Choose the CSV file of the AUV",
+                                          filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+    else:
+        path = filedialog.askdirectory(initialdir=start, parent=root)
     root.destroy()
     if path:
         st.session_state[key] = str(Path(path))
@@ -68,12 +73,16 @@ def fill_from_deployment(folder):
     pick = lambda test: next((str(p) for p in subs if test(p.name.lower())), "")
     st.session_state["ctd"] = pick(lambda n: n.endswith("ctd_data")) or st.session_state.get("ctd", "")
     st.session_state["nav"] = pick(lambda n: n.endswith("nav_data")) or st.session_state.get("nav", "")
-    st.session_state["csv"] = pick(lambda n: n.endswith(("csv_data", "vehicle_data"))) or st.session_state.get("csv", "")
+    loose_csv = sorted(p for p in folder.glob("*.csv") if p.is_file())  # CSV files directly in the deployment folder
+    st.session_state["csv"] = (pick(lambda n: n.endswith(("csv_data", "vehicle_data")))
+                               or (str(loose_csv[0]) if len(loose_csv) == 1 else str(folder) if loose_csv else "")
+                               or st.session_state.get("csv", ""))
     if st.session_state["csv"] and not st.session_state["ctd"]:
         st.session_state["vformat"] = CSV_FORMAT
     st.session_state["project"] = pick(lambda n: n.startswith("uvp6_")) or st.session_state.get("project", "")
     st.session_state["figures"] = pick(lambda n: "figure" in n) or str(folder / "diagnostic_figures")
     data = st.session_state["csv"] if st.session_state["vformat"] == CSV_FORMAT else st.session_state["ctd"]
+    data = str(Path(data).parent) if data and Path(data).is_file() else data
     st.session_state["vehicle"] = (guess_vehicle(Path(data).name if data else "")
                                    or guess_vehicle(Path(st.session_state["project"]).name)
                                    or st.session_state["vehicle"])
@@ -89,7 +98,7 @@ def guess_vehicle(name):
 
 
 def folder_input(label, key, help_, on_change=None, status=None):
-    """Folder field; `status` = (ok, text) is shown in its title, green when ok, red otherwise."""
+    """Folder (or file) field; `status` = (ok, text) is shown in its title, green when ok, red otherwise."""
     if status is not None:
         ok, text = status
         label = f":green[✅ **{label}** · {text}]" if ok else f":red[⚠️ **{label}** · {text}]"
@@ -108,12 +117,22 @@ def files_status(folder, pattern):
     return n > 0, f"{n} {pattern[1:]} file{'s' if n != 1 else ''} found" if n else f"no {pattern[1:]} file in this folder"
 
 
-def csv_status(folder):
-    """Simple CSV files of the vehicle: found, and with the required columns."""
-    ok, text = files_status(folder, "*.csv")
+def csv_files(path):
+    """The CSV file chosen, or every .csv file of the folder chosen."""
+    return [path] if path.is_file() else sorted(auv_data.list_data_files(path, "*.csv"))
+
+
+def csv_status(path):
+    """Simple CSV file(s) of the AUV: found, and with the required columns."""
+    if path and path.is_file():
+        if path.suffix.lower() != ".csv":
+            return False, "not a .csv file"
+        ok, text = True, "1 .csv file"
+    else:
+        ok, text = files_status(path, "*.csv")
     if not ok:
         return ok, text
-    for f in auv_data.list_data_files(folder, "*.csv"):
+    for f in csv_files(path):
         try:
             missing = auv_data.simple_csv_missing_columns(f)
         except Exception as e:  # unreadable file
@@ -152,7 +171,7 @@ def figures_status(figures):
 
 # ---------------------------------------------------------------- pipeline
 def run_pipeline(vehicle, project, figures, name, cruise, depth_int, time_int, thresholds, log):
-    """The four cells of run_UVP_toolbox.py. `vehicle` = ("ALR", ctd, nav) or ("CSV", csv_folder).
+    """The four cells of run_UVP_toolbox.py. `vehicle` = ("ALR", ctd, nav) or ("CSV", csv file or folder).
     `log` receives the printed text of each step."""
     figures.mkdir(parents=True, exist_ok=True)
     out = {}
@@ -160,7 +179,7 @@ def run_pipeline(vehicle, project, figures, name, cruise, depth_int, time_int, t
     with st.status("1. Load and parse the vehicle data", expanded=False) as s:
         with capture(log, "1"):
             if vehicle[0] == "CSV":
-                big_df = auv_data.load_simple_csv(sorted(auv_data.list_data_files(vehicle[1], "*.csv")), verbose=True)
+                big_df = auv_data.load_simple_csv(csv_files(vehicle[1]), verbose=True)
             else:
                 big_df = auv_data.load_alr_files(sorted(auv_data.list_data_files(vehicle[1], "*.log")),
                                                  sorted(auv_data.list_data_files(vehicle[2], "*.csv")), verbose=True)
@@ -234,7 +253,7 @@ st.header("1 · Choose the data folders")
 st.write("Choose the folder of the deployment (as **ALR4_demo**): the four folders below are found in it. "
          "You can also choose each folder yourself. Each title turns green once its folder is ready.")
 folder_input("Deployment folder", "deployment",
-             "Folder holding <vehicle>_ctd_data and <vehicle>_nav_data (or <vehicle>_csv_data) and the uvp6_… project",
+             "Folder holding <vehicle>_ctd_data and <vehicle>_nav_data (or the CSV file of the AUV) and the uvp6_… project",
              on_change=lambda: Path(st.session_state["deployment"]).is_dir()
              and fill_from_deployment(Path(st.session_state["deployment"])))
 if st.session_state.get("deployment_note"):
@@ -251,8 +270,11 @@ with st.container(border=True):
                   "pressure (dbar) or depth (m), pitch (degrees), latitude, longitude; optional temperature, "
                   "conductivity, oxygen, roll")
     if csv_mode:
-        vehicle = ("CSV", folder_input("AUV CSV folder", "csv",
-                                       "Every .csv file directly in this folder is read", status=statuses[0]))
+        st.caption("Click **Browse…** to choose the CSV file of the AUV. If the data are split into several CSV "
+                   "files, type instead the path of the folder that holds them: every .csv file in it is read.")
+        vehicle = ("CSV", folder_input("AUV CSV file", "csv",
+                                       "One .csv file, or a folder: every .csv file directly in it is read",
+                                       status=statuses[0]))
     else:
         vehicle = ("ALR", folder_input("ALR CTD folder", "ctd", "Every .log file directly in this folder is read",
                                        status=statuses[0]),

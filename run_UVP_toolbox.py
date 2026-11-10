@@ -43,8 +43,10 @@ prompter = TkPrompter()
 # %% 1. Load and parse the AUV data (ALR CTD and NAV files, or simple CSV files)
 # ==========
 if AUV_DATA_FORMAT == "CSV":
-    csv_dir = prompter.choose_directory("Select the AUV CSV files folder")
-    assert csv_dir is not None, "cancelled"
+    from tkinter import filedialog
+    csv_files = filedialog.askopenfilenames(title="Select the CSV file(s) of the AUV",
+                                            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+    assert csv_files, "cancelled"
 else:
     ctd_dir = prompter.choose_directory(
         "Select the ALR CTD files folder")
@@ -63,7 +65,7 @@ out_dir = Path(out_dir)
 out_dir.mkdir(parents=True, exist_ok=True)
 
 if AUV_DATA_FORMAT == "CSV":
-    csv_files = sorted(auv_data.list_data_files(csv_dir, "*.csv"))
+    csv_files = sorted(csv_files)
     print(f"{len(csv_files)} CSV file(s)")
     big_df = auv_data.load_simple_csv(csv_files, verbose=True)
 else:
