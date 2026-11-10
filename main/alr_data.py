@@ -376,6 +376,72 @@ def load_preformatted_csv(path, verbose=False):
 
 
 # ---------------------------------------------------------------------------
+# 2.3.2  Vehicle data as simple CSV files (any AUV)
+# ---------------------------------------------------------------------------
+
+# Column names of the simple CSV (case-insensitive) -> names used by the pipeline
+SIMPLE_CSV_REQUIRED = {"time": "Timestamp", "pitch": "pitch", "latitude": "position_lat", "longitude": "position_lon"}
+SIMPLE_CSV_DEPTH = {"pressure": "Pressure", "depth": "depth"}  # at least one of them
+SIMPLE_CSV_OPTIONAL = {"temperature": "Temperature", "conductivity": "Conductivity", "oxygen": "Oxygen",
+                       "roll": "roll"}
+
+
+def simple_csv_missing_columns(path):
+    """Required columns missing from the header of a simple CSV file (empty list when it is fine)."""
+    cols = {c.strip().lower() for c in pl.read_csv(path, n_rows=1).columns}
+    missing = [c for c in SIMPLE_CSV_REQUIRED if c not in cols]
+    if not cols & set(SIMPLE_CSV_DEPTH):
+        missing.append("pressure or depth")
+    return missing
+
+
+def load_simple_csv(files, verbose=False):
+    """Load vehicle data from one or more simple CSV files, for any AUV.
+
+    Each file has a header line and the columns (case-insensitive):
+        time        Unix time in seconds, or ISO 8601 date-time in UTC (e.g. 2024-06-11T03:34:00Z)
+        pressure    in dbar, or depth in m (pressure is used when both are given; depth otherwise,
+                    taking 1 m as 1 dbar)
+        pitch       in degrees
+        latitude, longitude   in decimal degrees
+    and optionally temperature, conductivity, oxygen and roll, kept in the netCDF and CTD files.
+    Other columns are ignored.
+
+    Produces the same shape of dataframe as load_all_files().
+    """
+    known = {**SIMPLE_CSV_REQUIRED, **SIMPLE_CSV_DEPTH, **SIMPLE_CSV_OPTIONAL}
+    runs = []
+    for path in files:
+        df = pl.read_csv(path, infer_schema_length=10000, null_values=["", "NaN", "nan", "NA"])
+        df = df.rename({c: c.strip().lower() for c in df.columns})
+        missing = simple_csv_missing_columns(path)
+        if missing:
+            raise ValueError(f"{path}: missing column(s) {', '.join(missing)}")
+        df = df.select([c for c in df.columns if c in known])
+        if df.schema["time"].is_numeric():
+            t = pl.col("time").cast(pl.Float64)
+        else:  # ISO 8601, in UTC
+            t = (pl.col("time").cast(pl.Utf8).str.strip_chars().str.replace(r"Z$", "")
+                 .str.to_datetime(time_unit="us").dt.epoch(time_unit="us").cast(pl.Float64) / 1e6)
+        df = df.with_columns(t.alias("time"))
+        df = df.with_columns([pl.col(c).cast(pl.Float64) for c in df.columns if c != "time"])
+        df = df.rename({c: known[c] for c in df.columns})
+        if "Pressure" not in df.columns:
+            df = df.with_columns(pl.col("depth").alias("Pressure"))
+        df = df.with_columns(pl.lit(str(path)).alias("source_csv"))
+        if verbose:
+            print(f"[CSV] {path}: {df.height} rows, columns {df.columns}")
+        runs.append(df)
+
+    big_df = pl.concat(runs, how="diagonal").sort("Timestamp")
+    if big_df["Pressure"].drop_nulls().len() > 0:
+        big_df = big_df.with_columns(pl.col("Pressure").interpolate_by("Timestamp"))
+    # QC: drop rows where BOTH Pressure and pitch are null
+    big_df = big_df.filter(~(pl.col("Pressure").is_null() & pl.col("pitch").is_null()))
+    return big_df.with_row_index(name="row_id")
+
+
+# ---------------------------------------------------------------------------
 # 3.1  Profile analysis (wraps find_profiles_ALR)
 # ---------------------------------------------------------------------------
 

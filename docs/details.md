@@ -17,6 +17,24 @@ buttons. Select the `alr_uvp` environment as the Python interpreter.
 merged; subfolders are ignored. In future releases, the ALR CTD and NAV data will come in a single
 netCDF file.
 
+**Other AUVs (or ALR data exported to CSV)**: one folder of simple CSV files (`AUV_DATA_FORMAT =
+"CSV"` in the script, "Simple CSV files (any AUV)" in the app). Each file has a header line and the
+columns below; names are case-insensitive, other columns are ignored, several files are merged and
+sorted by time.
+
+| Column | Unit | |
+| --- | --- | --- |
+| `time` | Unix time in s, or ISO 8601 date-time in UTC (`2024-06-11T03:34:00Z`) | required |
+| `pressure` or `depth` | dbar, or m (pressure is used when both are given; depth is taken as 1 m = 1 dbar) | required |
+| `pitch` | degrees | required |
+| `latitude`, `longitude` | decimal degrees | required |
+| `temperature`, `conductivity`, `oxygen`, `roll` | as in the ALR files | optional, kept in the netCDF and CTD files |
+
+```
+time,pressure,pitch,latitude,longitude
+1718076840.25,3.12,-21.4,62.81503,-20.29011
+```
+
 **UVP6**: a project created with UVPapp, named
 `uvp6_<uvp6_serial_number>_<first_deployment_date>_<cruise_name>_<platform><platform_serial_number>`,
 e.g. `uvp6_sn000227lp_20240807_dy180_biocarbon1_alr4`. `<first_deployment_date>` is the start date
@@ -38,6 +56,7 @@ At the top of [`run_UVP_toolbox.py`](../run_UVP_toolbox.py) (the app has the sam
 | --- | --- |
 | `ALR_SERIAL_NUMBER` | ALR serial, e.g. `4` becomes `ALR004`. Names the netCDF files and the `meta/alr_meta_sn004` folder. |
 | `CRUISE` | Cruise name, written to the sample file. |
+| `AUV_DATA_FORMAT` | `"ALR"`: folders of ALR CTD `.log` and NAV `.csv` files; `"CSV"`: simple CSV files of any AUV (see Data). |
 | `OUTPUT_DIR` | Folder for all figures. `None` asks with a dialog. |
 | `PHASE_DETECTION` | Thresholds of the phase detection (any other `alr_data.detect_profiles` parameter can be added). The same values are drawn on the phase detection figure. |
 | `DEPTH_INTEGRATION` | `integrationtime` of the depth-integrated samples (`P`: downcasts, upcasts, transitions), in m. 5 by default. |

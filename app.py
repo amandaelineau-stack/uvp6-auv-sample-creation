@@ -28,6 +28,7 @@ from uvp_toolbox.prompts import NullPrompter
 
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
                     "livecamera", "log", "meta", "raw", "results")
+ALR_FORMAT, CSV_FORMAT = "ALR CTD and NAV files", "Simple CSV files (any AUV)"
 BUTTON_WIDTH = 420  # px, the Run and Download buttons
 
 st.set_page_config(page_title="ALR–UVP6 pipeline", page_icon=Image.open(REPO / "alr_app.ico"), layout="wide")
@@ -68,6 +69,9 @@ def fill_from_deployment(folder):
     pick = lambda test: next((str(p) for p in subs if test(p.name.lower())), "")
     st.session_state["ctd"] = pick(lambda n: n.endswith("ctd_data")) or st.session_state.get("ctd", "")
     st.session_state["nav"] = pick(lambda n: n.endswith("nav_data")) or st.session_state.get("nav", "")
+    st.session_state["csv"] = pick(lambda n: n.endswith(("csv_data", "vehicle_data"))) or st.session_state.get("csv", "")
+    if st.session_state["csv"] and not st.session_state["ctd"]:
+        st.session_state["vformat"] = CSV_FORMAT
     st.session_state["project"] = pick(lambda n: n.startswith("uvp6_")) or st.session_state.get("project", "")
     st.session_state["figures"] = pick(lambda n: "figure" in n) or str(folder / "diagnostic_figures")
     m = re.match(r"alr(\d+)_", Path(st.session_state["ctd"]).name.lower()) if st.session_state["ctd"] else None
@@ -94,6 +98,21 @@ def files_status(folder, pattern):
         return False, "folder not found"
     n = len(alr_data.list_data_files(folder, pattern))
     return n > 0, f"{n} {pattern[1:]} file{'s' if n != 1 else ''} found" if n else f"no {pattern[1:]} file in this folder"
+
+
+def csv_status(folder):
+    """Simple CSV files of the vehicle: found, and with the required columns."""
+    ok, text = files_status(folder, "*.csv")
+    if not ok:
+        return ok, text
+    for f in alr_data.list_data_files(folder, "*.csv"):
+        try:
+            missing = alr_data.simple_csv_missing_columns(f)
+        except Exception as e:  # unreadable file
+            return False, f"{Path(f).name} cannot be read: {e}"
+        if missing:
+            return False, f"{Path(f).name} has no column {', '.join(missing)}"
+    return True, text + ", columns found"
 
 
 def project_status(project):
@@ -124,17 +143,21 @@ def figures_status(figures):
 
 
 # ---------------------------------------------------------------- pipeline
-def run_pipeline(ctd, nav, project, figures, serial, cruise, depth_int, time_int, thresholds, log):
-    """The four cells of run_UVP_toolbox.py. `log` receives the printed text of each step."""
+def run_pipeline(vehicle, project, figures, serial, cruise, depth_int, time_int, thresholds, log):
+    """The four cells of run_UVP_toolbox.py. `vehicle` = ("ALR", ctd, nav) or ("CSV", csv_folder).
+    `log` receives the printed text of each step."""
     alr = f"ALR{serial:03d}"
     figures.mkdir(parents=True, exist_ok=True)
     out = {}
 
-    with st.status("1. Load and parse the ALR data (CTD and NAV)", expanded=False) as s:
+    with st.status("1. Load and parse the vehicle data", expanded=False) as s:
         with capture(log, "1"):
-            big_df = alr_data.load_all_files(sorted(alr_data.list_data_files(ctd, "*.log")),
-                                             sorted(alr_data.list_data_files(nav, "*.csv")), verbose=True)
-        s.update(label=f"1. ALR data loaded: {big_df.height:,} records", state="complete")
+            if vehicle[0] == "CSV":
+                big_df = alr_data.load_simple_csv(sorted(alr_data.list_data_files(vehicle[1], "*.csv")), verbose=True)
+            else:
+                big_df = alr_data.load_all_files(sorted(alr_data.list_data_files(vehicle[1], "*.log")),
+                                                 sorted(alr_data.list_data_files(vehicle[2], "*.csv")), verbose=True)
+        s.update(label=f"1. Vehicle data loaded: {big_df.height:,} records", state="complete")
 
     with st.status("2. Identify the ALR phases", expanded=False) as s:
         with capture(log, "2"):
@@ -188,10 +211,11 @@ def capture(log, step):
 
 # ---------------------------------------------------------------- page
 st.title("ALR–UVP6 sample creation")
-st.caption("Creates the UVPapp sample file of a UVP6 deployment on an Autosub Long Range (ALR) vehicle, "
-           "from the ALR CTD and navigation files and the UVP6 project. Everything runs on this computer.")
+st.caption("Creates the UVPapp sample file of a UVP6 deployment on an autonomous underwater vehicle (AUV), "
+           "such as the Autosub Long Range (ALR), from the vehicle data (ALR CTD and navigation files, or simple "
+           "CSV files) and the UVP6 project. Everything runs on this computer.")
 
-for k, v in (("deployment", ""), ("ctd", ""), ("nav", ""), ("project", ""), ("figures", ""), ("serial", 4)):
+for k, v in (("deployment", ""), ("ctd", ""), ("nav", ""), ("csv", ""), ("vformat", ALR_FORMAT), ("project", ""), ("figures", ""), ("serial", 4)):
     st.session_state.setdefault(k, v)
 # the deployment folder can be given in the address: http://localhost:8501/?deployment=C:\ALR\ALR4_demo
 from_url = st.query_params.get("deployment", "")
@@ -203,22 +227,34 @@ st.header("1 · Choose the data folders")
 st.write("Choose the folder of the deployment (as **ALR4_demo**): the four folders below are found in it. "
          "You can also choose each folder yourself. Each title turns green once its folder is ready.")
 folder_input("Deployment folder", "deployment",
-             "Folder holding <serial>_ctd_data, <serial>_nav_data and the uvp6_… project",
+             "Folder holding <serial>_ctd_data, <serial>_nav_data (or a …csv_data folder) and the uvp6_… project",
              on_change=lambda: Path(st.session_state["deployment"]).is_dir()
              and fill_from_deployment(Path(st.session_state["deployment"])))
 if st.session_state.get("deployment_note"):
     st.info(st.session_state["deployment_note"])
 as_path = lambda key: Path(st.session_state[key]) if st.session_state.get(key) else None
-statuses = [files_status(as_path("ctd"), "*.log"), files_status(as_path("nav"), "*.csv"),
-            project_status(as_path("project")), figures_status(as_path("figures"))]
+csv_mode = st.session_state["vformat"] == CSV_FORMAT
+statuses = ([csv_status(as_path("csv"))] if csv_mode else
+            [files_status(as_path("ctd"), "*.log"), files_status(as_path("nav"), "*.csv")])
+statuses += [project_status(as_path("project")), figures_status(as_path("figures"))]
 ok = all(good for good, _ in statuses)
 with st.container(border=True):
-    ctd = folder_input("ALR CTD folder", "ctd", "Every .log file directly in this folder is read", status=statuses[0])
-    nav = folder_input("ALR NAV folder", "nav", "Every .csv file directly in this folder is read", status=statuses[1])
+    st.radio("AUV data format", (ALR_FORMAT, CSV_FORMAT), key="vformat", horizontal=True,
+             help="Simple CSV: one or more .csv files with the columns time (Unix seconds or ISO 8601 UTC), "
+                  "pressure (dbar) or depth (m), pitch (degrees), latitude, longitude; optional temperature, "
+                  "conductivity, oxygen, roll")
+    if csv_mode:
+        vehicle = ("CSV", folder_input("AUV CSV folder", "csv",
+                                       "Every .csv file directly in this folder is read", status=statuses[0]))
+    else:
+        vehicle = ("ALR", folder_input("ALR CTD folder", "ctd", "Every .log file directly in this folder is read",
+                                       status=statuses[0]),
+                   folder_input("ALR NAV folder", "nav", "Every .csv file directly in this folder is read",
+                                status=statuses[1]))
     project = folder_input("UVP6 project folder (UVPapp)", "project",
                            "uvp6_<serial>_<date>_<cruise>_<platform>: a complete UVPapp project, sequences merged",
-                           status=statuses[2])
-    figures = folder_input("Figures folder", "figures", "Where the figures are saved", status=statuses[3])
+                           status=statuses[-2])
+    figures = folder_input("Figures folder", "figures", "Where the figures are saved", status=statuses[-1])
 
 st.header("2 · Check the processing settings")
 c1, c2, c3, c4 = st.columns(4)
@@ -248,7 +284,7 @@ if not ok:
 if st.button("Run the pipeline", type="primary", disabled=not ok, width=BUTTON_WIDTH):
     log = {}
     try:
-        res = run_pipeline(ctd, nav, project, figures, int(serial), cruise.strip(), depth_int, time_int,
+        res = run_pipeline(vehicle, project, figures, int(serial), cruise.strip(), depth_int, time_int,
                            thresholds, log)
         st.session_state["result"] = dict(res, figures=figures, log=log, serial=int(serial))
         st.session_state.pop("error", None)

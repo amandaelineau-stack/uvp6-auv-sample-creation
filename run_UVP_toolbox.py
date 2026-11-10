@@ -20,6 +20,10 @@ from uvp_toolbox.prompts import TkPrompter
 ALR_SERIAL_NUMBER = 4
 ALR_SERIAL = f"ALR{ALR_SERIAL_NUMBER:03d}"
 CRUISE = "DY180"
+# AUV data: "ALR" = folders of ALR CTD (.log) and NAV (.csv) files;
+# "CSV" = simple CSV files of any AUV (columns time, pressure or depth, pitch,
+# latitude, longitude; see alr_data.load_simple_csv)
+AUV_DATA_FORMAT = "ALR"
 OUTPUT_DIR = None # Output for figures; set here to skip prompts asking for figure directory
 # Phase detection thresholds, used by the detection and shown on its figure;
 # any other alr_data.detect_profiles parameter can be added here
@@ -35,15 +39,19 @@ UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
 
 prompter = TkPrompter()
 # ==========
-# %% 1. Load and parse the ALR data (CTD and NAV)
+# %% 1. Load and parse the vehicle data (ALR CTD and NAV, or simple CSV)
 # ==========
-ctd_dir = prompter.choose_directory(
-    "Select the ALR CTD files folder")
-assert ctd_dir is not None, "cancelled"
+if AUV_DATA_FORMAT == "CSV":
+    csv_dir = prompter.choose_directory("Select the AUV CSV files folder")
+    assert csv_dir is not None, "cancelled"
+else:
+    ctd_dir = prompter.choose_directory(
+        "Select the ALR CTD files folder")
+    assert ctd_dir is not None, "cancelled"
 
-nav_dir = prompter.choose_directory(
-    "Select the ALR NAV files folder")
-assert nav_dir is not None, "cancelled"
+    nav_dir = prompter.choose_directory(
+        "Select the ALR NAV files folder")
+    assert nav_dir is not None, "cancelled"
 
 if OUTPUT_DIR is None:
     out_dir = prompter.choose_directory("Select the figures folder")
@@ -53,13 +61,18 @@ else:
 out_dir = Path(out_dir)
 out_dir.mkdir(parents=True, exist_ok=True)
 
-ctd_files = sorted(alr_data.list_data_files(ctd_dir,"*.log"))
-nav_files = sorted(alr_data.list_data_files(nav_dir,"*.csv"))
-print(f"{len(ctd_files)} CTD log(s), {len(nav_files)} nav file(s)")
+if AUV_DATA_FORMAT == "CSV":
+    csv_files = sorted(alr_data.list_data_files(csv_dir, "*.csv"))
+    print(f"{len(csv_files)} CSV file(s)")
+    big_df = alr_data.load_simple_csv(csv_files, verbose=True)
+else:
+    ctd_files = sorted(alr_data.list_data_files(ctd_dir,"*.log"))
+    nav_files = sorted(alr_data.list_data_files(nav_dir,"*.csv"))
+    print(f"{len(ctd_files)} CTD log(s), {len(nav_files)} nav file(s)")
 
-big_df = alr_data.load_all_files(ctd_files,
-                                 nav_files,
-                                 verbose=True)
+    big_df = alr_data.load_all_files(ctd_files,
+                                     nav_files,
+                                     verbose=True)
 big_df.write_parquet(REPO / "_cache_big_df.parquet")
 
 # ==========

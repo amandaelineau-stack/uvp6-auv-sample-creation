@@ -72,4 +72,8 @@ Close UVPapp before running cell 4.
     └── CTDdata/*.ctd                        one CTD file per sample (written)
 ```
 
+Other AUVs: instead of the two ALR folders, one folder of simple CSV files with the columns
+`time`, `pressure` (or `depth`), `pitch`, `latitude`, `longitude` (see
+[docs/details.md](docs/details.md#data)).
+
 Files of a previous run are moved to `archives/` folders, not overwritten.
