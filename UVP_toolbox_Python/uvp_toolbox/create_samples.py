@@ -24,6 +24,7 @@ import numpy as np
 
 from .detection_vector_meta_file import detection_vector_meta_file
 from .diagnostics import make_timedepth_plots, sampling_interval_diagnostics
+from .qc import coverage_gaps, run_alr_qc
 from .get_meta_from_vector_meta_file import get_meta_alr, get_meta_from_vector_meta_file, parse_alr_filename
 from .matlab_compat import datestr_yyyymmdd_HHMMSS, num2str
 from .usable_depth_limit import usable_depth_limit
@@ -147,7 +148,7 @@ class SampleRow:
 def detect_vector_type(project_folder, prompter: Optional[Prompter] = None) -> str:
     """Platform from the project folder *name* (MATLAB tests the whole path):
     ``sea`` -> SeaExplorer, ``SG`` -> SeaGlider, ``WMO`` -> float, or an
-    ``alr_meta_sn*`` folder under ``doc`` -> ALR.  Otherwise asks ``prompter``
+    ``alr_meta_sn*`` folder under ``meta`` (or ``doc`` in older projects) -> ALR.  Otherwise asks ``prompter``
     (error when no prompter is given)."""
     project_folder = Path(project_folder)
     name = project_folder.name
@@ -157,7 +158,7 @@ def detect_vector_type(project_folder, prompter: Optional[Prompter] = None) -> s
         return "SeaGlider"
     if "WMO" in name:
         return "float"
-    if any((project_folder / "doc").glob("alr_meta_sn*")):
+    if any((project_folder / "meta").glob("alr_meta_sn*")) or any((project_folder / "doc").glob("alr_meta_sn*")):
         return "ALR"
     warnings.warn("Only Seaexplorer, Seaglider, Float, and ALR project types are supported")
     prompter = prompter or NullPrompter()
@@ -182,8 +183,9 @@ def sample_filename_for(project_folder) -> str:
 
 def archive_existing_sample_file(sample_path: Path, assume_yes: bool = False, now = None,
                                  prompter: Optional[Prompter] = None) -> Optional[Path]:
-    """Rename an existing sample file with a timestamp suffix (after asking,
-    unless ``assume_yes``).  Returns the archived path or ``None``."""
+    """Move an existing sample file to ``meta/archives/`` with a timestamp
+    suffix (after asking, unless ``assume_yes``), as UVPapp does when the
+    metadata are edited (#13).  Returns the archived path or ``None``."""
     if not sample_path.exists():
         return None
     warnings.warn("There is already a meta data file in \\meta. IT WILL BE ARCHIVED")
@@ -195,7 +197,9 @@ def archive_existing_sample_file(sample_path: Path, assume_yes: bool = False, no
             "It will be archived. Continue?", default=False):
             raise RuntimeError("ERROR: Process has been aborted")
     stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
-    archived = sample_path.with_name(f"{sample_path.stem}_{stamp}{sample_path.suffix}")
+    archives = sample_path.parent / "archives"
+    archives.mkdir(exist_ok=True)
+    archived = archives / f"{sample_path.stem}_{stamp}{sample_path.suffix}"
     sample_path.replace(archived)
     return archived
 
@@ -300,6 +304,9 @@ def create_samples(
     deep_black_limit: float = 100.0,
     plots_dir=None,
     make_plots: bool = True,
+    qc_min_images: int = 20,
+    depth_integration: float = 5.0,
+    time_integration: float = 3600.0,
     assume_yes: bool = False,
     prompter: Optional[Prompter] = None,
     verbose: bool = False,
@@ -310,7 +317,12 @@ def create_samples(
     (pressure difference identifying float parkings, 70 with margins) and
     ``deep_black_limit`` (depth below which the black level is instrumental,
     100 m).  ``cruise`` overrides ``config/cruise_info.txt``; ``plots_dir``
-    is asked for with the ``prompter`` when not given.
+    is asked for with the ``prompter`` when not given.  ``qc_min_images`` is the
+    sample size below which the quality checks report a sample as small (ALR only).
+    ``depth_integration`` (m) and ``time_integration`` (s) are written to the
+    ``integrationtime`` column of the ALR samples: depth-integrated (P) for
+    downcasts, upcasts and transitions, time-integrated (T) for transects and
+    surface transects, as in the DY180 sample file (#16).
     """
     if project_folder is None:
         print("Select UVP project folder ")
@@ -375,6 +387,8 @@ def create_samples(
 
     rows: list[SampleRow] = []
     alr_time = alr_depth = None
+    res = None
+    qc_samples: list[tuple[str, str, int]] = []  # (sample, phase letter, images) for the quality checks
     if vector_type != "ALR":
         match = get_meta_from_vector_meta_file(
             vector_type, meta_data_folder, project_folder, ref_time_list,
@@ -392,13 +406,14 @@ def create_samples(
         for i in range(len(res.sample_names)):
             s = seqs[int(res.assigned_uvp_seq_idx[i])]
             _, seg_id, letter = parse_alr_filename(res.vector_filenames[i])
-            # Only 'u' and 'd' segments traverse the water column (depth
-            # integration); anything else is time-integrated like a parking.
-            if letter in ("u", "d"):
-                sample_type, integration_time = "P", s.integration_time
+            # Profiles and transitions cross the water column (depth integration);
+            # transects stay at one depth (time integration), as for DY180 (#16).
+            if letter in ("d", "u", "x"):
+                sample_type, integration_time = "P", depth_integration
             else:
-                sample_type, integration_time = "T", 1.0
+                sample_type, integration_time = "T", time_integration
             station_id = "segment_NaN" if math.isnan(seg_id) else f"segment_{int(seg_id)}"
+            qc_samples.append((res.sample_names[i], letter, int(res.end_idx[i]) - int(res.start_idx[i]) + 1))
             rows.append(SampleRow(
                 cruise=cruise_name, ship=vector_sn, filename=s.name, profileid=res.sample_names[i],
                 latitude=float(res.lat[i]), longitude=float(res.lon[i]),
@@ -434,12 +449,21 @@ def create_samples(
     if make_plots:
         outdir = Path(plots_dir)
         try:
-            make_timedepth_plots(outdir, uvp_time_series, uvp_depth_series, alr_time, alr_depth)
+            gaps = []
+            if res is not None:  # periods without UVP image, shaded on the time-depth figures
+                t_uvp = np.concatenate([np.asarray(t, dtype="datetime64[ns]").ravel() for t in uvp_time_series])
+                gaps = [(g.start, g.end) for g in coverage_gaps(res.phases, t_uvp)[0]]
+            make_timedepth_plots(outdir, uvp_time_series, uvp_depth_series, alr_time, alr_depth, gaps=gaps)
         except Exception as exc:  # the MATLAB block is wrapped the same way
             print(f"Plotting skipped: {exc}")
         try:
             sampling_interval_diagnostics(outdir, uvp_time_series, alr_time)
         except Exception as exc:
             print(f"Sampling interval diagnostics skipped: {exc}")
+        if res is not None:
+            try:
+                run_alr_qc(outdir, uvp_time_series, uvp_depth_series, res, qc_samples, min_images=qc_min_images)
+            except Exception as exc:
+                print(f"Quality checks skipped: {exc}")
 
     return sample_path
