@@ -22,6 +22,9 @@ from uvp_toolbox.prompts import TkPrompter
 VEHICLE_NAMESN = "ALR004"
 # Name and identifier of the cruise, written to the sample file, e.g. "DY180Biocarbon1"
 CRUISE_NAMEID = "DY180Biocarbon1"
+# Ship of the cruise, written to the "ship" column of the sample file, e.g. "Discovery";
+# None or "" writes the AUV name and serial number instead
+SHIP_NAME = "Discovery"
 # AUV data: "ALR" = folders of ALR CTD (.log) and NAV (.csv) files;
 # "CSV" = simple CSV files of any AUV (columns time, pressure or depth, pitch,
 # latitude, longitude; see auv_data.load_simple_csv)
@@ -141,6 +144,7 @@ print(f"Written {len(written)} phase netCDF(s) to {meta_dir}")
 # ==========
 sample_file = create_samples(project,
                              cruise=CRUISE_NAMEID,
+                             ship=SHIP_NAME,
                              plots_dir=out_dir,
                              depth_integration=DEPTH_INTEGRATION,
                              time_integration=TIME_INTEGRATION,

@@ -170,7 +170,7 @@ def figures_status(figures):
 
 
 # ---------------------------------------------------------------- pipeline
-def run_pipeline(vehicle, project, figures, name, cruise, depth_int, time_int, thresholds, log):
+def run_pipeline(vehicle, project, figures, name, cruise, ship, depth_int, time_int, thresholds, log):
     """The four cells of run_UVP_toolbox.py. `vehicle` = ("ALR", ctd, nav) or ("CSV", csv file or folder).
     `log` receives the printed text of each step."""
     figures.mkdir(parents=True, exist_ok=True)
@@ -217,7 +217,7 @@ def run_pipeline(vehicle, project, figures, name, cruise, depth_int, time_int, t
 
     with st.status("4. Generate the UVPapp sample file", expanded=False) as s:
         with capture(log, "4"):
-            out["sample_file"] = create_samples(project, cruise=cruise or None, plots_dir=figures,
+            out["sample_file"] = create_samples(project, cruise=cruise or None, ship=ship or None, plots_dir=figures,
                                                 depth_integration=depth_int, time_integration=time_int,
                                                 prompter=NullPrompter(), assume_yes=True)
             plt.close("all")
@@ -286,7 +286,7 @@ with st.container(border=True):
     figures = folder_input("Figures folder", "figures", "Where the figures are saved", status=statuses[-1])
 
 st.header("2 · Check the processing settings")
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c5, c3, c4 = st.columns(5)
 c1.text_input("AUV name and serial number", key="vehicle",
               help="Letters, digits and _, e.g. ALR004: starts the netCDF and figure names and is written to "
                    "the sample file. Found from the name of the data folder when possible")
@@ -294,6 +294,8 @@ name_ok = bool(re.fullmatch(r"\w+", st.session_state["vehicle"].strip(), re.ASCI
 if not name_ok:
     c1.caption(":red[AUV name and serial number: letters, digits and _ only]")
 cruise = c2.text_input("Cruise name and ID", help="e.g. DY180Biocarbon1. Leave empty to read it from config/cruise_info.txt")
+ship = c5.text_input("Ship", help="Ship of the cruise, e.g. Discovery, written to the 'ship' column of the sample "
+                                  "file. Leave empty to write the AUV name and serial number instead")
 depth_int = c3.number_input("Depth bin of d/u/x samples (m)", min_value=1, value=5,
                             help="Sample file 'integrationtime' of depth-integrated samples")
 time_int = c4.number_input("Time bin of t/s samples (s)", min_value=60, value=3600, step=60,
@@ -317,7 +319,7 @@ if not ok:
 if st.button("Run the pipeline", type="primary", disabled=not (ok and name_ok), width=BUTTON_WIDTH):
     log = {}
     try:
-        res = run_pipeline(vehicle, project, figures, st.session_state["vehicle"].strip(), cruise.strip(), depth_int, time_int,
+        res = run_pipeline(vehicle, project, figures, st.session_state["vehicle"].strip(), cruise.strip(), ship.strip(), depth_int, time_int,
                            thresholds, log)
         st.session_state["result"] = dict(res, figures=figures, log=log, vehicle=st.session_state["vehicle"].strip())
         st.session_state.pop("error", None)

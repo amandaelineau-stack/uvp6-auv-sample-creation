@@ -301,6 +301,7 @@ def create_samples(
     *,
     vector_type: Optional[str] = None,
     cruise: Optional[str] = None,
+    ship: Optional[str] = None,
     parking_pressure_diff: float = 70.0,
     deep_black_limit: float = 100.0,
     plots_dir=None,
@@ -317,7 +318,9 @@ def create_samples(
     Parameters mirror the MATLAB script's inputs: ``parking_pressure_diff``
     (pressure difference identifying float parkings, 70 with margins) and
     ``deep_black_limit`` (depth below which the black level is instrumental,
-    100 m).  ``cruise`` overrides ``config/cruise_info.txt``; ``plots_dir``
+    100 m).  ``cruise`` overrides ``config/cruise_info.txt``; ``ship`` (e.g. the
+    research vessel of the cruise) fills the ``ship`` column, which otherwise
+    gets the platform name (e.g. the AUV name ALR004); ``plots_dir``
     is asked for with the ``prompter`` when not given.  ``qc_min_images`` is the
     sample size below which the quality checks report a sample as small (AUV only).
     ``depth_integration`` (m) and ``time_integration`` (s) are written to the
@@ -357,6 +360,7 @@ def create_samples(
     print(f"{vector_type} project")
 
     meta_data_folder, vector_sn = detection_vector_meta_file(project_folder, vector_type)
+    ship_name = ship.strip() if ship and ship.strip() else vector_sn  # 'ship' column of the sample file
 
     meta_dir = project_folder / "meta"
     meta_dir.mkdir(exist_ok=True)
@@ -396,7 +400,7 @@ def create_samples(
             [s.name for s in seqs], [s.profile_type for s in seqs], cruise_name)
         for i, s in enumerate(seqs):
             rows.append(SampleRow(
-                cruise=cruise_name, ship=vector_sn, filename=s.name, profileid=match.sample_names[i],
+                cruise=cruise_name, ship=ship_name, filename=s.name, profileid=match.sample_names[i],
                 latitude=float(match.lat[i]), longitude=float(match.lon[i]),
                 firstimage=s.start_idx, volimage=s.volimage, aa=s.aa, exp=s.exp, endimg=s.end_idx,
                 stationid=num2str(match.yo[i]), sampletype=s.sample_type, integrationtime=s.integration_time,
@@ -416,7 +420,7 @@ def create_samples(
             station_id = "segment_NaN" if math.isnan(seg_id) else f"segment_{int(seg_id)}"
             qc_samples.append((res.sample_names[i], letter, int(res.end_idx[i]) - int(res.start_idx[i]) + 1))
             rows.append(SampleRow(
-                cruise=cruise_name, ship=vector_sn, filename=s.name, profileid=res.sample_names[i],
+                cruise=cruise_name, ship=ship_name, filename=s.name, profileid=res.sample_names[i],
                 latitude=float(res.lat[i]), longitude=float(res.lon[i]),
                 firstimage=int(res.start_idx[i]), volimage=s.volimage, aa=s.aa, exp=s.exp, endimg=int(res.end_idx[i]),
                 stationid=station_id, sampletype=sample_type, integrationtime=integration_time,
