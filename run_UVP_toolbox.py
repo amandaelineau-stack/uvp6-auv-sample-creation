@@ -17,10 +17,11 @@ import auv_plots
 from uvp_toolbox.create_samples import create_samples
 from uvp_toolbox.prompts import TkPrompter
 
-# Name of the AUV (letters, digits, _): starts the netCDF and figure names, names the
+# Name and serial number of the AUV (letters, digits, _): starts the netCDF and figure names, names the
 # meta/auv_meta_<name> folder and is written to the sample file, e.g. "ALR004"
-VEHICLE_NAME = "ALR004"
-CRUISE = "DY180"
+VEHICLE_NAMESN = "ALR004"
+# Name and identifier of the cruise, written to the sample file, e.g. "DY180Biocarbon1"
+CRUISE_NAMEID = "DY180Biocarbon1"
 # AUV data: "ALR" = folders of ALR CTD (.log) and NAV (.csv) files;
 # "CSV" = simple CSV files of any AUV (columns time, pressure or depth, pitch,
 # latitude, longitude; see auv_data.load_simple_csv)
@@ -34,9 +35,10 @@ PHASE_DETECTION = dict(gradient_thresholds=[0.05, -0.05],
 # (d, u, x) and time bin (s) of the time-integrated samples (t, s)
 DEPTH_INTEGRATION = 5
 TIME_INTEGRATION = 3600
-# Folders of a UVPapp project, checked in cell 3: the pipeline does not create them
+# Folders that UVPapp creates in a new project (Project > Create New Project), checked in cell 3:
+# the pipeline does not create them
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
-                    "livecamera", "log", "meta", "raw", "results")
+                    "livecamera", "log", "meta", "raw")
 
 prompter = TkPrompter()
 # ==========
@@ -85,11 +87,11 @@ df, profiles_df = auv_data.detect_profiles(big_df, **PHASE_DETECTION)
 df = auv_data.attach_profiles(df, profiles_df)
 
 fig, _ = auv_plots.plot_phase_detection(profiles_df, **PHASE_DETECTION, show=False)
-fig.savefig(out_dir / f"{VEHICLE_NAME}_phase_detection.png", dpi=150)
+fig.savefig(out_dir / f"{VEHICLE_NAMESN}_phase_detection.png", dpi=150)
 plt.show()
 
 fig, _ = auv_plots.plot_phase_sectioning(df, show=False)
-fig.savefig(out_dir / f"{VEHICLE_NAME}_phase_sectioning.png", dpi=150)
+fig.savefig(out_dir / f"{VEHICLE_NAMESN}_phase_sectioning.png", dpi=150)
 plt.show()
 
 auv_plots.check_phases(df)  # prints the phase durations and any warning
@@ -107,13 +109,13 @@ assert not missing, f"Not a complete UVPapp project, missing folder(s): {', '.jo
 
 # The phase netCDFs go to meta/, next to the sample file: raw, config and meta
 # are the folders kept and backed up for a UVP project
-meta_dir = project / "meta" / auv_data.meta_folder_name(VEHICLE_NAME)
+meta_dir = project / "meta" / auv_data.meta_folder_name(VEHICLE_NAMESN)
 meta_dir.mkdir(exist_ok=True)
 
 cruise_info = project / "config" / "cruise_info.txt"
 if not cruise_info.exists():
     cruise_info.write_text(f"UVP project cruise info \n\
-                           name: {CRUISE}\n",
+                           name: {CRUISE_NAMEID}\n",
                            encoding="latin-1")
 
 # netCDFs of a previous run are moved to archives/, as cell 4 reads every .nc of meta_dir
@@ -127,7 +129,7 @@ if old_nc:
 
 written = auv_data.export_auv_netcdf(
     df,
-    vehicle_name=VEHICLE_NAME,
+    vehicle_name=VEHICLE_NAMESN,
     output_dir=str(meta_dir),
     max_files=None,
 )
@@ -138,7 +140,7 @@ print(f"Written {len(written)} phase netCDF(s) to {meta_dir}")
 # %% 4. Generate the UVPapp sample file (header file)
 # ==========
 sample_file = create_samples(project,
-                             cruise=CRUISE,
+                             cruise=CRUISE_NAMEID,
                              plots_dir=out_dir,
                              depth_integration=DEPTH_INTEGRATION,
                              time_integration=TIME_INTEGRATION,

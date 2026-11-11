@@ -43,7 +43,7 @@ e.g. `uvp6_sn000227lp_20240807_dy180_biocarbon1_alr4`. `<first_deployment_date>`
 of the deployment (`yyyymmdd`), not the date the project was created.
 
 - The project must be complete, with all the UVPapp folders (`calibration`, `config`, `CTDdata`,
-  `doc`, `ecodata`, `livecamera`, `log`, `meta`, `raw`, `results`), as `ALR4_demo` is: the
+  `doc`, `ecodata`, `livecamera`, `log`, `meta`, `raw`, as UVPapp creates them), as `ALR4_demo` is: the
   pipeline does not create them, and cell 3 stops with the list of the missing ones.
 - When the UVP6 restarted during the deployment, merge its sequences in UVPapp first: the pipeline
   uses the merged sequence (`_Merged-NNN`) and ignores the originals (`_UsedForMerge`).
@@ -56,8 +56,8 @@ At the top of [`run_UVP_toolbox.py`](../run_UVP_toolbox.py) (the app has the sam
 
 | Setting | What it does |
 | --- | --- |
-| `VEHICLE_NAME` | Name of the AUV (letters, digits and `_`), e.g. `ALR004`. Starts the netCDF and figure names, names the `meta/auv_meta_alr004` folder and is written to the sample file. The app finds it from the data folder name (`ALR004_ctd_data`, `ALR004_csv_data`). |
-| `CRUISE` | Cruise name, written to the sample file. |
+| `VEHICLE_NAMESN` | Name and serial number of the AUV (letters, digits and `_`), e.g. `ALR004`. Starts the netCDF and figure names, names the `meta/auv_meta_alr004` folder and is written to the sample file. The app finds it from the data folder name (`ALR004_ctd_data`, `ALR004_csv_data`). |
+| `CRUISE_NAMEID` | Name and identifier of the cruise, e.g. `DY180Biocarbon1`, written to the sample file. |
 | `AUV_DATA_FORMAT` | `"ALR"`: folders of ALR CTD `.log` and NAV `.csv` files; `"CSV"`: simple CSV files of any AUV (see Data). |
 | `OUTPUT_DIR` | Folder for all figures. `None` asks with a dialog. |
 | `PHASE_DETECTION` | Thresholds of the phase detection (any other `auv_data.detect_profiles` parameter can be added). The same values are drawn on the phase detection figure. |

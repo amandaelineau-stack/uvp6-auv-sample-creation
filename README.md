@@ -36,7 +36,8 @@ http://localhost:8501. It runs on your computer, on your data: nothing is sent a
 
 1. **Data**: click **Browse…** and choose the deployment folder, e.g. `C:\AUV\ALR4_demo`. Its
    folders are found and checked: each title must turn green.
-2. **Settings**: check the AUV name, the cruise and the sample integration.
+2. **Settings**: check the AUV name and serial number, the cruise name and ID and the sample
+   integration.
 3. **Run**: click **Run the pipeline**.
 4. **Results**: download the sample file, and look at the checks and the figures.
 
@@ -47,7 +48,7 @@ If the black window shows "python is not recognized", type in Anaconda Prompt:
 ## Run with the script
 
 Open [`run_UVP_toolbox.py`](run_UVP_toolbox.py) in VS Code (Python and Jupyter extensions,
-`auv_uvp` interpreter), set `VEHICLE_NAME`, `AUV_DATA_FORMAT`, `CRUISE` and the other settings at
+`auv_uvp` interpreter), set `VEHICLE_NAMESN`, `AUV_DATA_FORMAT`, `CRUISE_NAMEID` and the other settings at
 the top, and click **Run Cell** above each `# %%`, in order:
 
 | Cell | Asks for | What happens |

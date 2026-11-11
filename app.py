@@ -27,7 +27,7 @@ from uvp_toolbox.create_samples import create_samples
 from uvp_toolbox.prompts import NullPrompter
 
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
-                    "livecamera", "log", "meta", "raw", "results")
+                    "livecamera", "log", "meta", "raw")
 ALR_FORMAT, CSV_FORMAT = "ALR CTD and NAV files", "Simple CSV files (any AUV)"
 BUTTON_WIDTH = 420  # px, the Run and Download buttons
 
@@ -287,13 +287,13 @@ with st.container(border=True):
 
 st.header("2 · Check the processing settings")
 c1, c2, c3, c4 = st.columns(4)
-c1.text_input("AUV name", key="vehicle",
+c1.text_input("AUV name and serial number", key="vehicle",
               help="Letters, digits and _, e.g. ALR004: starts the netCDF and figure names and is written to "
                    "the sample file. Found from the name of the data folder when possible")
 name_ok = bool(re.fullmatch(r"\w+", st.session_state["vehicle"].strip(), re.ASCII))
 if not name_ok:
-    c1.caption(":red[AUV name: letters, digits and _ only]")
-cruise = c2.text_input("Cruise", help="Leave empty to read it from config/cruise_info.txt")
+    c1.caption(":red[AUV name and serial number: letters, digits and _ only]")
+cruise = c2.text_input("Cruise name and ID", help="e.g. DY180Biocarbon1. Leave empty to read it from config/cruise_info.txt")
 depth_int = c3.number_input("Depth bin of d/u/x samples (m)", min_value=1, value=5,
                             help="Sample file 'integrationtime' of depth-integrated samples")
 time_int = c4.number_input("Time bin of t/s samples (s)", min_value=60, value=3600, step=60,
