@@ -27,7 +27,7 @@ sorted by time. In the app, **Browse…** chooses the CSV file (or type the path
 | Column | Unit | |
 | --- | --- | --- |
 | `time` | Unix time in s, or ISO 8601 date-time in UTC (`2024-06-11T03:34:00Z`) | required |
-| `pressure` or `depth` | dbar, or m (pressure is used when both are given; depth is taken as 1 m = 1 dbar) | required |
+| `pressure` or `depth` | dbar, or m (pressure is used when both are given; otherwise the pressure is computed from the depth with TEOS-10, `gsw.p_from_z`) | required |
 | `pitch` | degrees | required |
 | `latitude`, `longitude` | decimal degrees | required |
 | `temperature`, `conductivity`, `oxygen`, `roll` | as in the ALR files | optional, kept in the netCDF and CTD files |
@@ -106,10 +106,11 @@ Near the end of cell 4, two lines summarise the matching:
 - The phase netCDFs are saved in `meta/`, with the sample file: `raw`, `config` and `meta` are the
   folders needed for the science, and the ones backed up at some institutes. Projects processed
   before, with the netCDFs in `doc/alr_meta_sn004/` or `meta/alr_meta_sn004/` (before the pipeline was opened to all AUVs), are still read.
-- Each phase netCDF holds `TIME`, `DEPTH_SCI` (CTD pressure), `DEPTH_ENG`, `DEPTH_SCI_INTERP`,
-  `LAT`, `LON`, `TEMPERATURE`, `CONDUCTIVITY`, `OXYGEN`, `PITCH_ENG` and `ROLL_ENG`. The CTD files
-  fill the UVPapp columns time, depth, pressure, temperature and conductivity, followed by all the
-  netCDF variables.
+- Each phase netCDF holds `TIME`, `DEPTH_SCI` (depth in m from the CTD pressure with TEOS-10,
+  `-gsw.z_from_p(SCI_PRESS, LAT)`), `SCI_PRESS` (CTD pressure, dbar), `DEPTH_ENG`, `DEPTH_SCI_INTERP`,
+  `LAT`, `LON`, `TEMPERATURE`, `CONDUCTIVITY`, `OXYGEN`, `PITCH_ENG` and `ROLL_ENG`. The phase
+  detection runs on `DEPTH_SCI`. The CTD files fill the UVPapp columns time, depth (`DEPTH_SCI`),
+  pressure (`SCI_PRESS`), temperature and conductivity, followed by all the netCDF variables.
 - In the sample file, downcasts, upcasts and transitions are depth-integrated samples (`P`,
   `integrationtime` = `DEPTH_INTEGRATION`), transects and surface transects time-integrated samples
   (`T`, `integrationtime` = `TIME_INTEGRATION`).

@@ -25,12 +25,45 @@ from bisect import bisect_right
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import gsw
 import numpy as np
 import pandas as pd
 import polars as pl
 import xarray as xr
 
 import find_profiles as fp
+
+
+# ---------------------------------------------------------------------------
+# Pressure <-> depth (TEOS-10)
+# ---------------------------------------------------------------------------
+
+def _latitude_for_gsw(df, time_col):
+    """Latitude at every row for the TEOS-10 conversions: position_lat interpolated in time
+    over the gaps, and held at the first/last fix before/after them."""
+    if "position_lat" not in df.columns or df["position_lat"].drop_nulls().drop_nans().len() == 0:
+        raise ValueError("no latitude (position_lat) in the AUV data: needed to convert pressure to depth "
+                         "with TEOS-10 (gsw.z_from_p)")
+    lat = (df.select(pl.col("position_lat").cast(pl.Float64).fill_nan(None)
+                     .interpolate_by(time_col).forward_fill().backward_fill())
+           .to_series())
+    return lat.to_numpy()
+
+
+def depth_from_pressure(df, pressure_col="Pressure", time_col="Timestamp"):
+    """Depth (m, positive down) from sea pressure (dbar) with TEOS-10: -gsw.z_from_p(p, lat).
+    Returns a Float64 Series, null where the pressure is null."""
+    p = df[pressure_col].cast(pl.Float64).to_numpy()
+    z = gsw.z_from_p(p, _latitude_for_gsw(df, time_col))
+    return pl.Series("DEPTH", -np.asarray(z, dtype=float)).fill_nan(None)
+
+
+def pressure_from_depth(df, depth_col="depth", time_col="Timestamp"):
+    """Sea pressure (dbar) from depth (m, positive down) with TEOS-10: gsw.p_from_z(-depth, lat).
+    Returns a Float64 Series, null where the depth is null."""
+    d = df[depth_col].cast(pl.Float64).to_numpy()
+    p = gsw.p_from_z(-d, _latitude_for_gsw(df, time_col))
+    return pl.Series("Pressure", np.asarray(p, dtype=float)).fill_nan(None)
 
 
 # ---------------------------------------------------------------------------
@@ -407,8 +440,8 @@ def load_simple_csv(files, verbose=False):
 
     Each file has a header line and the columns (case-insensitive):
         time        Unix time in seconds, or ISO 8601 date-time in UTC (e.g. 2024-06-11T03:34:00Z)
-        pressure    in dbar, or depth in m (pressure is used when both are given; depth otherwise,
-                    taking 1 m as 1 dbar)
+        pressure    in dbar, or depth in m (pressure is used when both are given; otherwise the
+                    pressure is computed from the depth with TEOS-10, gsw.p_from_z)
         pitch       in degrees
         latitude, longitude   in decimal degrees
     and optionally temperature, conductivity, oxygen and roll, kept in the netCDF and CTD files.
@@ -434,7 +467,8 @@ def load_simple_csv(files, verbose=False):
         df = df.with_columns([pl.col(c).cast(pl.Float64) for c in df.columns if c != "time"])
         df = df.rename({c: known[c] for c in df.columns})
         if "Pressure" not in df.columns:
-            df = df.with_columns(pl.col("depth").alias("Pressure"))
+            df = df.sort("Timestamp")
+            df = df.with_columns(pressure_from_depth(df, "depth", "Timestamp"))
         df = df.with_columns(pl.lit(str(path)).alias("source_csv"))
         if verbose:
             print(f"[CSV] {path}: {df.height} rows, columns {df.columns}")
@@ -461,7 +495,7 @@ def detect_profiles(
     transect_duration="5m",
     transect_depth_range=[10, 20, 30],
     transect_depth_bottom_limits=[20, 50],
-    profile_duration="1m",
+    profile_duration="2m",
     strict_profiles=False,
     use_only_pit_vel=False,
     back_fill_mod=1,
@@ -470,18 +504,17 @@ def detect_profiles(
 ):
     """Run find_profiles on a built dataframe.
 
-    Renames Timestamp -> TIME and Pressure -> DEPTH (pressure is used as the
-    profiling variable), converts TIME to Datetime[ns], then runs the algorithm.
+    Renames Timestamp -> TIME and Pressure -> PRESSURE, adds DEPTH (m) computed
+    from the pressure with TEOS-10 (-gsw.z_from_p(PRESSURE, latitude)) as the
+    profiling variable, converts TIME to Datetime[ns], then runs the algorithm.
 
     Returns (df, profiles_df):
         df          - the renamed input, needed later by attach_profiles()
         profiles_df - the algorithm output, one row per input row
     """
-    # Rename columns to what find_profiles expects
-    df = big_df.rename({
-        "Timestamp": "TIME",
-        "Pressure": "DEPTH",   # treat pressure as depth for profiling
-    })
+    # Rename columns to what find_profiles expects; depth from pressure with TEOS-10
+    df = big_df.rename({"Timestamp": "TIME", "Pressure": "PRESSURE"})
+    df = df.with_columns(depth_from_pressure(df, "PRESSURE", "TIME"))
 
     # Convert TIME (epoch seconds float) -> Datetime[ns]
     df = df.with_columns((pl.col("TIME") * 1e9).cast(pl.Datetime("ns")).alias("TIME"))
@@ -585,6 +618,7 @@ def _event_type_for_transect(g: pl.DataFrame, surface_thresh: float) -> str:
 def _dataset_from_group(g: pl.DataFrame) -> xr.Dataset:
     rename_map = {
         "DEPTH": "DEPTH_SCI",
+        "PRESSURE": "SCI_PRESS",
         "depth": "DEPTH_ENG",
         "INTERP_DEPTH": "DEPTH_SCI_INTERP",
         "position_lat": "LAT",
@@ -666,7 +700,7 @@ def export_auv_netcdf(
         raise ValueError(f"Missing required columns: {missing_req}")
 
     maybe_cols = [
-        "DEPTH", "depth", "INTERP_DEPTH",
+        "DEPTH", "PRESSURE", "depth", "INTERP_DEPTH",
         "profile_num_new", "transect_num",
         "is_profile", "is_transect",
         "Temperature", "Conductivity", "Oxygen",
@@ -748,7 +782,7 @@ def export_auv_netcdf(
     other_df = (
         sdf_with_seg
         .filter(not_flagged)
-        .select([c for c in ["TIME", "position_lat", "position_lon", "DEPTH", "depth",
+        .select([c for c in ["TIME", "position_lat", "position_lon", "DEPTH", "PRESSURE", "depth",
                              "INTERP_DEPTH", "segment_id", "orig_idx", "Temperature",
                              "Conductivity", "Oxygen", "pitch", "roll"]
                  if c in sdf_with_seg.columns])
