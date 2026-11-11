@@ -1,15 +1,15 @@
-"""Plotting of the outputs built by alr_data.py.
+"""Plotting of the outputs built by auv_data.py.
 
 Nothing here loads, builds or writes data — every function takes a dataframe
-that alr_data.py has already produced, and draws it.
+that auv_data.py has already produced, and draws it.
 
-    import alr_plots
+    import auv_plots
 
-    alr_plots.plot_pressure_overview(big_df)
-    alr_plots.plot_phase_detection(profiles_df, gradient_thresholds=[0.05, -0.05], ...)
-    alr_plots.plot_vertical_velocity(profiles_df)
-    alr_plots.plot_series_pair(big_df_with_profiles, "Temperature", "position_lat")
-    alr_plots.plot_phase_sectioning(big_df_with_profiles)
+    auv_plots.plot_pressure_overview(big_df)
+    auv_plots.plot_phase_detection(profiles_df, gradient_thresholds=[0.05, -0.05], ...)
+    auv_plots.plot_vertical_velocity(profiles_df)
+    auv_plots.plot_series_pair(big_df_with_profiles, "Temperature", "position_lat")
+    auv_plots.plot_phase_sectioning(big_df_with_profiles)
 
 Each function returns (fig, axs) so the notebook can tweak the result further.
 
@@ -74,7 +74,7 @@ def to_datetime64(series: pl.Series) -> np.ndarray:
 
 def phase_types(df, surface_thresh=5.0):
     """Phase letter (d, u, t, s or x) of every row, with the rules of
-    alr_data.export_alr_netcdf: a profile is an upcast when its first depth is
+    auv_data.export_auv_netcdf: a profile is an upcast when its first depth is
     deeper than its last one, a transect is a surface transect when its mean
     depth is shallower than surface_thresh, and everything else is a transition.
     Records that find_profiles could not classify (NaN padding at the start and
@@ -98,7 +98,7 @@ def phase_types(df, surface_thresh=5.0):
 
 
 def phase_runs(df, surface_thresh=5.0):
-    """The phases as runs of rows, as alr_data.export_alr_netcdf writes them:
+    """The phases as runs of rows, as auv_data.export_auv_netcdf writes them:
     a new run when the phase type or the profile/transect number changes.
 
     Returns (t, z, types, runs, seg_starts): runs = [(first row, end row, letter)],
@@ -236,7 +236,7 @@ def plot_phase_detection(
     (M = -pitch x vertical velocity, Eq. 2 of the documentation); profile
     numbering before and after the duration and back-fill filters.
 
-    Pass the same thresholds as to alr_data.detect_profiles (any other detection
+    Pass the same thresholds as to auv_data.detect_profiles (any other detection
     parameter is accepted and ignored), so that the figure shows the thresholds
     actually used.
     """
@@ -307,9 +307,9 @@ def plot_phase_detection(
         rule = "a record is part of a profile when criterion 2 is met"
     else:
         rule = f"a record is part of a profile when criterion 1 {'and' if strict_profiles else 'or'} 2 is met"
-    fig.suptitle(f"ALR phase detection – {rule}", x=0.01, ha="left", fontweight="bold")
+    fig.suptitle(f"AUV phase detection – {rule}", x=0.01, ha="left", fontweight="bold")
     _phase_legend(fig, types)
-    _window_title(fig, "ALR phase detection – criteria")
+    _window_title(fig, "AUV phase detection – criteria")
 
     if show:
         plt.show()
@@ -423,10 +423,10 @@ def plot_phase_sectioning(big_df_with_profiles, surface_thresh=5.0, show=True):
                f"{counts['s']} surface transects, {counts['x']} transitions – {len(seg_starts) + 1} segments "
                f"(dotted lines)")
     ax.set_title(f"{len(runs)} phases: {summary}", loc="left")
-    fig.suptitle("ALR phase sectioning – result (one phase = one netCDF file = one sample)",
+    fig.suptitle("AUV phase sectioning – result (one phase = one netCDF file = one sample)",
                  x=0.01, ha="left", fontweight="bold")
     _phase_legend(fig, types)
-    _window_title(fig, "ALR phase sectioning – result")
+    _window_title(fig, "AUV phase sectioning – result")
 
     if show:
         plt.show()

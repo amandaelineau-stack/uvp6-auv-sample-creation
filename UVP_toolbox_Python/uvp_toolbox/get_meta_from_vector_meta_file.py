@@ -6,9 +6,9 @@ MATLAB function contains two unrelated algorithms in one body:
 * the original sequential matcher for SeaExplorer / SeaGlider / BGC-Argo
   floats, which walks the metadata files and the UVP sequences in lock-step
   (``get_meta_from_vector_meta_file``), and
-* the ALR matcher added later, which walks every ALR segment file and picks
+* the AUV matcher added later, which walks every AUV segment file and picks
   the UVP sequence with the most images inside the segment's time span
-  (``get_meta_alr``).
+  (``get_meta_auv``).
 
 They are split into two functions here; the driver calls the right one.
 
@@ -32,20 +32,20 @@ from .vector_io import (
     VectorMeta,
     convert_latlon_seaexplorer,
     read_data_seaexplorer,
-    read_meta_alr,
+    read_meta_auv,
     read_meta_float,
     read_meta_seaglider,
 )
 
-# GPS points kept per ALR phase for the coverage map
+# GPS points kept per AUV phase for the coverage map
 TRACK_POINTS = 200
 
 __all__ = [
     "VectorMatch",
-    "AlrMatch",
+    "AuvMatch",
     "get_meta_from_vector_meta_file",
-    "get_meta_alr",
-    "parse_alr_filename",
+    "get_meta_auv",
+    "parse_auv_filename",
     "pick_best_sequence",
     "enforce_non_overlapping_indices",
 ]
@@ -62,23 +62,23 @@ class VectorMatch:
 
 
 @dataclass
-class AlrMatch:
-    """One entry per matched ALR segment file."""
+class AuvMatch:
+    """One entry per matched AUV segment file."""
     lon: np.ndarray
     lat: np.ndarray
-    yo: np.ndarray                      # ALR segment id (NaN when not in the filename)
-    sample_names: list[str]             # ALR file basename
-    vector_filenames: list[str]         # ALR file name with extension
+    yo: np.ndarray                      # AUV segment id (NaN when not in the filename)
+    sample_names: list[str]             # AUV file basename
+    vector_filenames: list[str]         # AUV file name with extension
     start_idx: np.ndarray               # 0-based first UVP image (as UVPapp expects)
     end_idx: np.ndarray                 # 0-based last UVP image
     start_time: np.ndarray              # datetime64[ns] of the first matched image
     assigned_uvp_seq_idx: np.ndarray    # 0-based index into the UVP sequence list
-    alr_plot_time: np.ndarray           # concatenated ALR times of every phase, matched or not (for diagnostics)
-    alr_plot_depth: np.ndarray          # concatenated DEPTH_SCI
+    auv_plot_time: np.ndarray           # concatenated AUV times of every phase, matched or not (for diagnostics)
+    auv_plot_depth: np.ndarray          # concatenated DEPTH_SCI
     skipped_count: int
-    total_alr: int
+    total_auv: int
     ctd_failures: list[tuple[str, str]] = field(default_factory=list)
-    # Every ALR phase file, matched or not: name, letter, start, end, n_images (0 = no UVP image),
+    # Every AUV phase file, matched or not: name, letter, start, end, n_images (0 = no UVP image),
     # and its GPS track (track_time, track_lat, track_lon, at most TRACK_POINTS points)
     phases: list[dict] = field(default_factory=list)
 
@@ -125,8 +125,8 @@ def get_meta_from_vector_meta_file(
     elif vector_type == "float":
         files = sorted(meta_data_folder.glob("S*.nc"))
         reader = read_meta_float
-    elif vector_type == "ALR":
-        raise ValueError("ALR projects use get_meta_alr()")
+    elif vector_type == "AUV":
+        raise ValueError("AUV projects use get_meta_auv()")
     else:
         raise ValueError(f"Unknown vector type {vector_type!r}")
     if not files:
@@ -222,14 +222,14 @@ def get_meta_from_vector_meta_file(
 
 
 # ---------------------------------------------------------------------------
-# ALR matcher
+# AUV matcher
 # ---------------------------------------------------------------------------
 
-_ALR_LETTER_RE = re.compile(r"_([A-Za-z])\d+\.nc$")
+_PHASE_LETTER_RE = re.compile(r"_([A-Za-z])\d+\.nc$")
 
 
-def parse_alr_filename(name: str) -> tuple[str, float, str]:
-    """``ALR###_YYYYMMDD_uuuu_ssss_L####.nc`` -> ``(basename, segment_id, L)``.
+def parse_auv_filename(name: str) -> tuple[str, float, str]:
+    """``AUV###_YYYYMMDD_uuuu_ssss_L####.nc`` -> ``(basename, segment_id, L)``.
 
     The segment id is the fourth run of digits in the basename (NaN if there
     are fewer than four) and the letter is the event type
@@ -238,7 +238,7 @@ def parse_alr_filename(name: str) -> tuple[str, float, str]:
     base = Path(name).stem
     nums = re.findall(r"\d+", base)
     seg_id = float(nums[3]) if len(nums) >= 4 else math.nan
-    m = _ALR_LETTER_RE.search(name)
+    m = _PHASE_LETTER_RE.search(name)
     letter = m.group(1) if m else "na"
     return base, seg_id, letter
 
@@ -279,25 +279,25 @@ def enforce_non_overlapping_indices(start_idx, end_idx, seq_idx) -> np.ndarray:
     return end_idx
 
 
-def get_meta_alr(
+def get_meta_auv(
     meta_data_folder,
     project_folder,
     uvp_time_series: Sequence[np.ndarray],
     tolerance_seconds: float = 10.0,
     write_ctd: bool = True,
     verbose: bool = True,
-) -> AlrMatch:
-    """Walk every ALR segment ``.nc`` and match it to the UVP sequence with the
+) -> AuvMatch:
+    """Walk every AUV segment ``.nc`` and match it to the UVP sequence with the
     most images within the segment's time span (+/- ``tolerance_seconds``).
 
-    One CTD file per ALR segment is written as a side effect; failures are
-    collected in ``AlrMatch.ctd_failures`` rather than swallowed.
+    One CTD file per AUV segment is written as a side effect; failures are
+    collected in ``AuvMatch.ctd_failures`` rather than swallowed.
     """
     files = sorted(Path(meta_data_folder).glob("*.nc"))
     if not files:
-        raise FileNotFoundError(f"No ALR .nc files found in {meta_data_folder}")
+        raise FileNotFoundError(f"No AUV .nc files found in {meta_data_folder}")
     tol = np.timedelta64(int(round(tolerance_seconds * 1e9)), "ns")
-    total_alr = len(files)
+    total_auv = len(files)
 
     lat_acc: list[float] = []
     lon_acc: list[float] = []
@@ -317,24 +317,24 @@ def get_meta_alr(
 
     for k, path in enumerate(files, start=1):
         if verbose and k % 10 == 0:
-            print(f"Processing ALR file {k}/{total_alr}: {path.name}")
-        meta, data = read_meta_alr(path)
-        t_alr = meta.time
-        t_ok = finite_times(t_alr)
-        phase = {"name": path.stem, "letter": parse_alr_filename(path.name)[2],
+            print(f"Processing AUV file {k}/{total_auv}: {path.name}")
+        meta, data = read_meta_auv(path)
+        t_auv = meta.time
+        t_ok = finite_times(t_auv)
+        phase = {"name": path.stem, "letter": parse_auv_filename(path.name)[2],
                  "start": t_ok.min() if t_ok.size else None, "end": t_ok.max() if t_ok.size else None,
                  "n_images": 0}
         phases.append(phase)
         if t_ok.size == 0:
             skipped_count += 1
             continue
-        # every phase, so that the diagnostics show the ALR where the UVP has no image
+        # every phase, so that the diagnostics show the AUV where the UVP has no image
         if "DEPTH_SCI" in data.columns:
-            plot_time.append(np.asarray(t_alr, dtype="datetime64[ns]"))
+            plot_time.append(np.asarray(t_auv, dtype="datetime64[ns]"))
             plot_depth.append(data["DEPTH_SCI"].to_numpy(dtype=float))
-        gps = np.flatnonzero(~np.isnan(meta.lat) & ~np.isnan(meta.lon) & ~np.isnat(np.asarray(t_alr, dtype="datetime64[ns]")))
+        gps = np.flatnonzero(~np.isnan(meta.lat) & ~np.isnan(meta.lon) & ~np.isnat(np.asarray(t_auv, dtype="datetime64[ns]")))
         gps = gps[::max(1, gps.size // TRACK_POINTS)]
-        phase.update(track_time=np.asarray(t_alr, dtype="datetime64[ns]")[gps],
+        phase.update(track_time=np.asarray(t_auv, dtype="datetime64[ns]")[gps],
                      track_lat=np.asarray(meta.lat, dtype=float)[gps],
                      track_lon=np.asarray(meta.lon, dtype=float)[gps])
 
@@ -355,7 +355,7 @@ def get_meta_alr(
         lat_keep = float(meta.lat[lat_ok[0]]) if lat_ok.size else math.nan
         lon_keep = float(meta.lon[lon_ok[0]]) if lon_ok.size else math.nan
 
-        base, seg_id, _ = parse_alr_filename(path.name)
+        base, seg_id, _ = parse_auv_filename(path.name)
 
         name_acc.append(base)
         vfn_acc.append(path.name)
@@ -369,7 +369,7 @@ def get_meta_alr(
 
         if write_ctd:
             try:
-                create_ctd_file(project_folder, data, base + ".csv", "ALR")
+                create_ctd_file(project_folder, data, base + ".csv", "AUV")
             except Exception as exc:  # MATLAB swallows this silently; we record it
                 ctd_failures.append((path.name, f"{type(exc).__name__}: {exc}"))
 
@@ -378,9 +378,9 @@ def get_meta_alr(
         phase["n_images"] = int(e) - int(s) + 1
 
     if not name_acc:
-        warnings.warn(f"No ALR samples matched any UVP times within +/-{num2str(tolerance_seconds)} s.")
+        warnings.warn(f"No AUV samples matched any UVP times within +/-{num2str(tolerance_seconds)} s.")
 
-    return AlrMatch(
+    return AuvMatch(
         lon=np.array(lon_acc, dtype=float),
         lat=np.array(lat_acc, dtype=float),
         yo=np.array(yo_acc, dtype=float),
@@ -390,10 +390,10 @@ def get_meta_alr(
         end_idx=end_idx,
         start_time=np.array(stime_acc, dtype="datetime64[ns]"),
         assigned_uvp_seq_idx=np.array(seq_acc, dtype=int),
-        alr_plot_time=np.concatenate(plot_time) if plot_time else np.array([], dtype="datetime64[ns]"),
-        alr_plot_depth=np.concatenate(plot_depth) if plot_depth else np.array([], dtype=float),
+        auv_plot_time=np.concatenate(plot_time) if plot_time else np.array([], dtype="datetime64[ns]"),
+        auv_plot_depth=np.concatenate(plot_depth) if plot_depth else np.array([], dtype=float),
         skipped_count=skipped_count,
-        total_alr=total_alr,
+        total_auv=total_auv,
         ctd_failures=ctd_failures,
         phases=phases,
     )

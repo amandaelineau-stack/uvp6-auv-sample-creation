@@ -1,6 +1,6 @@
 """Readers for the vehicle ("vector") metadata files.
 
-    ReadMetaALR              -> read_meta_alr
+    ReadMetaALR              -> read_meta_auv
     ReadMetaSeaglider        -> read_meta_seaglider
     ReadMetaFloat            -> read_meta_float
     ReadDataSeaexplorer      -> read_data_seaexplorer
@@ -32,7 +32,7 @@ from .matlab_compat import epoch_seconds_to_datetime64
 __all__ = [
     "VectorMeta",
     "ncread",
-    "read_meta_alr",
+    "read_meta_auv",
     "read_meta_seaglider",
     "read_meta_float",
     "read_data_seaexplorer",
@@ -71,8 +71,8 @@ def ncread(ds: netCDF4.Dataset, name: str) -> np.ndarray:
 # ReadMetaALR
 # ---------------------------------------------------------------------------
 
-def read_meta_alr(nc_path) -> tuple[VectorMeta, pd.DataFrame]:
-    """Read an ALR segment netCDF (as written by ``main/alr_data.py``).
+def read_meta_auv(nc_path) -> tuple[VectorMeta, pd.DataFrame]:
+    """Read an AUV segment netCDF (as written by ``main/auv_data.py``).
 
     ``data_table`` columns: ``TIME`` (s since 1970-01-01 UTC), ``DEPTH_SCI``,
     and ``SCI_PRESS`` / ``LAT`` / ``LON`` / ``TEMPERATURE`` / ``CONDUCTIVITY`` /

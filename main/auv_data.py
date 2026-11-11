@@ -1,4 +1,4 @@
-"""Input, building and output of ALR data.
+"""Input, building and output of the AUV data (readers of the ALR CTD and NAV files and of simple CSV files).
 
 Covers the whole data path, with no plotting:
 
@@ -6,17 +6,17 @@ Covers the whole data path, with no plotting:
 
 Typical use:
 
-    import alr_data
+    import auv_data
 
-    ctd_files = alr_data.list_data_files("path/to/data", "*.log")
-    nav_files = alr_data.list_data_files("path/to/data", "*.csv")
+    ctd_files = auv_data.list_data_files("path/to/data", "*.log")
+    nav_files = auv_data.list_data_files("path/to/data", "*.csv")
 
-    big_df = alr_data.load_all_files(ctd_files, nav_files)
-    df, profiles_df = alr_data.detect_profiles(big_df)
-    big_df_with_profiles = alr_data.attach_profiles(df, profiles_df)
-    alr_data.export_alr_netcdf(big_df_with_profiles, alr_serial="ALR005")
+    big_df = auv_data.load_alr_files(ctd_files, nav_files)
+    df, profiles_df = auv_data.detect_profiles(big_df)
+    big_df_with_profiles = auv_data.attach_profiles(df, profiles_df)
+    auv_data.export_auv_netcdf(big_df_with_profiles, vehicle_name="ALR005")
 
-Plotting of these outputs lives in alr_plots.py.
+Plotting of these outputs lives in auv_plots.py.
 """
 
 import io
@@ -30,12 +30,19 @@ import pandas as pd
 import polars as pl
 import xarray as xr
 
-import find_profiles_ALR as fpALR
+import find_profiles as fp
 
 
 # ---------------------------------------------------------------------------
 # 2.1  Data directories
 # ---------------------------------------------------------------------------
+
+def meta_folder_name(vehicle_name):
+    """Folder of the phase netCDFs in the meta/ folder of the UVP6 project: auv_meta_<vehicle name>."""
+    if not vehicle_name or not str(vehicle_name).replace("_", "").isalnum():
+        raise ValueError(f"vehicle name {vehicle_name!r}: use letters, digits and _ only (e.g. ALR004)")
+    return f"auv_meta_{str(vehicle_name).lower()}"
+
 
 def list_data_files(directory, pattern):
     """List files matching `pattern` in `directory`, as resolved path strings.
@@ -47,7 +54,7 @@ def list_data_files(directory, pattern):
 
 
 # ---------------------------------------------------------------------------
-# 2.2 / 2.3  Raw ALR CTD (.log) + science navigation (.csv) files
+# 2.2 / 2.3  ALR: raw CTD (.log) + science navigation (.csv) files
 # ---------------------------------------------------------------------------
 
 # Column layouts of the two sampling rates found inside a CTD .log file
@@ -148,7 +155,7 @@ def load_file_pair(ctd_file, nav_file):
     return _merge_ctd_nav(all_data, nav_data)
 
 
-def load_all_files(ctd_files, nav_files, verbose=False):
+def load_alr_files(ctd_files, nav_files, verbose=False):
     """Parse every CTD and nav file and merge them into a single dataframe.
 
     This is section 2.3. Files that fail to open, have no 4 Hz / 1 Hz markers,
@@ -336,7 +343,7 @@ _PREFORMATTED_RENAMES = {
 def load_preformatted_csv(path, verbose=False):
     """Load an already-formatted CSV (e.g. ODV export) into the pipeline's schema.
 
-    Produces the same shape of dataframe as load_all_files().
+    Produces the same shape of dataframe as load_alr_files().
     """
     big_df = pl.read_csv(
         path,
@@ -376,7 +383,73 @@ def load_preformatted_csv(path, verbose=False):
 
 
 # ---------------------------------------------------------------------------
-# 3.1  Profile analysis (wraps find_profiles_ALR)
+# 2.3.2  Vehicle data as simple CSV files (any AUV)
+# ---------------------------------------------------------------------------
+
+# Column names of the simple CSV (case-insensitive) -> names used by the pipeline
+SIMPLE_CSV_REQUIRED = {"time": "Timestamp", "pitch": "pitch", "latitude": "position_lat", "longitude": "position_lon"}
+SIMPLE_CSV_DEPTH = {"pressure": "Pressure", "depth": "depth"}  # at least one of them
+SIMPLE_CSV_OPTIONAL = {"temperature": "Temperature", "conductivity": "Conductivity", "oxygen": "Oxygen",
+                       "roll": "roll"}
+
+
+def simple_csv_missing_columns(path):
+    """Required columns missing from the header of a simple CSV file (empty list when it is fine)."""
+    cols = {c.strip().lower() for c in pl.read_csv(path, n_rows=1).columns}
+    missing = [c for c in SIMPLE_CSV_REQUIRED if c not in cols]
+    if not cols & set(SIMPLE_CSV_DEPTH):
+        missing.append("pressure or depth")
+    return missing
+
+
+def load_simple_csv(files, verbose=False):
+    """Load vehicle data from one or more simple CSV files, for any AUV.
+
+    Each file has a header line and the columns (case-insensitive):
+        time        Unix time in seconds, or ISO 8601 date-time in UTC (e.g. 2024-06-11T03:34:00Z)
+        pressure    in dbar, or depth in m (pressure is used when both are given; depth otherwise,
+                    taking 1 m as 1 dbar)
+        pitch       in degrees
+        latitude, longitude   in decimal degrees
+    and optionally temperature, conductivity, oxygen and roll, kept in the netCDF and CTD files.
+    Other columns are ignored.
+
+    Produces the same shape of dataframe as load_alr_files().
+    """
+    known = {**SIMPLE_CSV_REQUIRED, **SIMPLE_CSV_DEPTH, **SIMPLE_CSV_OPTIONAL}
+    runs = []
+    for path in files:
+        df = pl.read_csv(path, infer_schema_length=10000, null_values=["", "NaN", "nan", "NA"])
+        df = df.rename({c: c.strip().lower() for c in df.columns})
+        missing = simple_csv_missing_columns(path)
+        if missing:
+            raise ValueError(f"{path}: missing column(s) {', '.join(missing)}")
+        df = df.select([c for c in df.columns if c in known])
+        if df.schema["time"].is_numeric():
+            t = pl.col("time").cast(pl.Float64)
+        else:  # ISO 8601, in UTC
+            t = (pl.col("time").cast(pl.Utf8).str.strip_chars().str.replace(r"Z$", "")
+                 .str.to_datetime(time_unit="us").dt.epoch(time_unit="us").cast(pl.Float64) / 1e6)
+        df = df.with_columns(t.alias("time"))
+        df = df.with_columns([pl.col(c).cast(pl.Float64) for c in df.columns if c != "time"])
+        df = df.rename({c: known[c] for c in df.columns})
+        if "Pressure" not in df.columns:
+            df = df.with_columns(pl.col("depth").alias("Pressure"))
+        df = df.with_columns(pl.lit(str(path)).alias("source_csv"))
+        if verbose:
+            print(f"[CSV] {path}: {df.height} rows, columns {df.columns}")
+        runs.append(df)
+
+    big_df = pl.concat(runs, how="diagonal").sort("Timestamp")
+    if big_df["Pressure"].drop_nulls().len() > 0:
+        big_df = big_df.with_columns(pl.col("Pressure").interpolate_by("Timestamp"))
+    # QC: drop rows where BOTH Pressure and pitch are null
+    big_df = big_df.filter(~(pl.col("Pressure").is_null() & pl.col("pitch").is_null()))
+    return big_df.with_row_index(name="row_id")
+
+
+# ---------------------------------------------------------------------------
+# 3.1  Profile analysis (wraps find_profiles)
 # ---------------------------------------------------------------------------
 
 def detect_profiles(
@@ -395,7 +468,7 @@ def detect_profiles(
     backfill_segments=True,
     force_split_up_down_casts=False,
 ):
-    """Run find_profiles_ALR on a built dataframe.
+    """Run find_profiles on a built dataframe.
 
     Renames Timestamp -> TIME and Pressure -> DEPTH (pressure is used as the
     profiling variable), converts TIME to Datetime[ns], then runs the algorithm.
@@ -413,7 +486,7 @@ def detect_profiles(
     # Convert TIME (epoch seconds float) -> Datetime[ns]
     df = df.with_columns((pl.col("TIME") * 1e9).cast(pl.Datetime("ns")).alias("TIME"))
 
-    profiles_df = fpALR.find_profiles(
+    profiles_df = fp.find_profiles(
         df,
         gradient_thresholds=gradient_thresholds,
         filter_win_sizes=filter_win_sizes,
@@ -558,28 +631,28 @@ def _dataset_from_group(g: pl.DataFrame) -> xr.Dataset:
 
     ds.attrs.update({
         "Conventions": "CF-1.9",
-        "title": "ALR profile/transect/other export",
+        "title": "AUV phase export (profile, transect or transition)",
         "institution": "NOCS",
         "source": "Polars→xarray export",
-        "history": "Created by export_alr_netcdf()",
+        "history": "Created by export_auv_netcdf()",
         "author": "hans.hilder@noc.ac.uk",
     })
     return ds
 
 
-def export_alr_netcdf(
+def export_auv_netcdf(
     df: pl.DataFrame,
     *,
-    alr_serial: str = "ALR000",
+    vehicle_name: str = "AUV000",
     surface_thresh: float = 5.0,
-    output_dir: str = "output_ALR000_netCDF",
+    output_dir: str = "output_netCDF",
     max_files: Optional[int] = 5,
 ) -> List[str]:
     """
     Exports per-profile (d/u), per-transect (t/s), and per-'other' contiguous run (x) NetCDF files.
 
     Filename:
-        {alr_serial}_{YYYYMMDD}_{unique_id:04d}_{segment_id:04d}_{etype}{etype_idx:04d}.nc
+        {vehicle_name}_{YYYYMMDD}_{unique_id:04d}_{segment_id:04d}_{etype}{etype_idx:04d}.nc
 
     Segment ID:
         0000 for anything before the first downcast that begins shallower than `surface_thresh`.
@@ -735,11 +808,11 @@ def export_alr_netcdf(
         ds = _dataset_from_group(ev["group"])
 
         date_str = ev["start_time"].strftime("%Y%m%d")
-        fname = f"{alr_serial}_{date_str}_{unique_id:04d}_{seg_id_for_file:04d}_{etype}{per_type_counts[etype]:04d}.nc"
+        fname = f"{vehicle_name}_{date_str}_{unique_id:04d}_{seg_id_for_file:04d}_{etype}{per_type_counts[etype]:04d}.nc"
         fpath = os.path.join(output_dir, fname)
 
         ds.attrs.update({
-            "alr_serial": alr_serial,
+            "vehicle_name": vehicle_name,
             "unique_id": unique_id,
             "segment_id": seg_id_for_file,
             "event_type": etype,         # d/u/t/s/x

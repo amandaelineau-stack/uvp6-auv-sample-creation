@@ -12,38 +12,54 @@ import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 
-import alr_data
-import alr_plots
+import auv_data
+import auv_plots
 from uvp_toolbox.create_samples import create_samples
 from uvp_toolbox.prompts import TkPrompter
 
-ALR_SERIAL_NUMBER = 4
-ALR_SERIAL = f"ALR{ALR_SERIAL_NUMBER:03d}"
-CRUISE = "DY180"
+# Name and serial number of the AUV (letters, digits, _): starts the netCDF and figure names, names the
+# meta/auv_meta_<name> folder and is written to the sample file, e.g. "ALR004"
+VEHICLE_NAMESN = "ALR004"
+# Name and identifier of the cruise, written to the sample file, e.g. "DY180Biocarbon1"
+CRUISE_NAMEID = "DY180Biocarbon1"
+# Ship of the cruise, written to the "ship" column of the sample file, e.g. "Discovery";
+# None or "" writes the AUV name and serial number instead
+SHIP_NAME = "Discovery"
+# AUV data: "ALR" = folders of ALR CTD (.log) and NAV (.csv) files;
+# "CSV" = simple CSV files of any AUV (columns time, pressure or depth, pitch,
+# latitude, longitude; see auv_data.load_simple_csv)
+AUV_DATA_FORMAT = "ALR"
 OUTPUT_DIR = None # Output for figures; set here to skip prompts asking for figure directory
 # Phase detection thresholds, used by the detection and shown on its figure;
-# any other alr_data.detect_profiles parameter can be added here
+# any other auv_data.detect_profiles parameter can be added here
 PHASE_DETECTION = dict(gradient_thresholds=[0.05, -0.05],
                        cust_gradient_thresholds=[0.005, -0.005])
 # Sample file 'integrationtime': depth bin (m) of the depth-integrated samples
 # (d, u, x) and time bin (s) of the time-integrated samples (t, s)
 DEPTH_INTEGRATION = 5
 TIME_INTEGRATION = 3600
-# Folders of a UVPapp project, checked in cell 3: the pipeline does not create them
+# Folders that UVPapp creates in a new project (Project > Create New Project), checked in cell 3:
+# the pipeline does not create them
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
-                    "livecamera", "log", "meta", "raw", "results")
+                    "livecamera", "log", "meta", "raw")
 
 prompter = TkPrompter()
 # ==========
-# %% 1. Load and parse the ALR data (CTD and NAV)
+# %% 1. Load and parse the AUV data (ALR CTD and NAV files, or simple CSV files)
 # ==========
-ctd_dir = prompter.choose_directory(
-    "Select the ALR CTD files folder")
-assert ctd_dir is not None, "cancelled"
+if AUV_DATA_FORMAT == "CSV":
+    from tkinter import filedialog
+    csv_files = filedialog.askopenfilenames(title="Select the CSV file(s) of the AUV",
+                                            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+    assert csv_files, "cancelled"
+else:
+    ctd_dir = prompter.choose_directory(
+        "Select the ALR CTD files folder")
+    assert ctd_dir is not None, "cancelled"
 
-nav_dir = prompter.choose_directory(
-    "Select the ALR NAV files folder")
-assert nav_dir is not None, "cancelled"
+    nav_dir = prompter.choose_directory(
+        "Select the ALR NAV files folder")
+    assert nav_dir is not None, "cancelled"
 
 if OUTPUT_DIR is None:
     out_dir = prompter.choose_directory("Select the figures folder")
@@ -53,33 +69,38 @@ else:
 out_dir = Path(out_dir)
 out_dir.mkdir(parents=True, exist_ok=True)
 
-ctd_files = sorted(alr_data.list_data_files(ctd_dir,"*.log"))
-nav_files = sorted(alr_data.list_data_files(nav_dir,"*.csv"))
-print(f"{len(ctd_files)} CTD log(s), {len(nav_files)} nav file(s)")
+if AUV_DATA_FORMAT == "CSV":
+    csv_files = sorted(csv_files)
+    print(f"{len(csv_files)} CSV file(s)")
+    big_df = auv_data.load_simple_csv(csv_files, verbose=True)
+else:
+    ctd_files = sorted(auv_data.list_data_files(ctd_dir,"*.log"))
+    nav_files = sorted(auv_data.list_data_files(nav_dir,"*.csv"))
+    print(f"{len(ctd_files)} CTD log(s), {len(nav_files)} nav file(s)")
 
-big_df = alr_data.load_all_files(ctd_files,
-                                 nav_files,
-                                 verbose=True)
+    big_df = auv_data.load_alr_files(ctd_files,
+                                     nav_files,
+                                     verbose=True)
 big_df.write_parquet(REPO / "_cache_big_df.parquet")
 
 # ==========
-# %% 2. Identify the ALR phases (profiles, transects, transitions)
+# %% 2. Identify the AUV phases (profiles, transects, transitions)
 # ==========
-df, profiles_df = alr_data.detect_profiles(big_df, **PHASE_DETECTION)
-df = alr_data.attach_profiles(df, profiles_df)
+df, profiles_df = auv_data.detect_profiles(big_df, **PHASE_DETECTION)
+df = auv_data.attach_profiles(df, profiles_df)
 
-fig, _ = alr_plots.plot_phase_detection(profiles_df, **PHASE_DETECTION, show=False)
-fig.savefig(out_dir / f"{ALR_SERIAL}_phase_detection.png", dpi=150)
+fig, _ = auv_plots.plot_phase_detection(profiles_df, **PHASE_DETECTION, show=False)
+fig.savefig(out_dir / f"{VEHICLE_NAMESN}_phase_detection.png", dpi=150)
 plt.show()
 
-fig, _ = alr_plots.plot_phase_sectioning(df, show=False)
-fig.savefig(out_dir / f"{ALR_SERIAL}_phase_sectioning.png", dpi=150)
+fig, _ = auv_plots.plot_phase_sectioning(df, show=False)
+fig.savefig(out_dir / f"{VEHICLE_NAMESN}_phase_sectioning.png", dpi=150)
 plt.show()
 
-alr_plots.check_phases(df)  # prints the phase durations and any warning
+auv_plots.check_phases(df)  # prints the phase durations and any warning
 
 # ==========
-# %% 3. Generate one netCDF file per ALR phase
+# %% 3. Generate one netCDF file per AUV phase
 # ==========
 project = prompter.choose_directory("Select the UVP6 project folder")
 assert project is not None, "cancelled"
@@ -89,15 +110,15 @@ project = Path(project)
 missing = [d for d in UVP_PROJECT_DIRS if not (project / d).is_dir()]
 assert not missing, f"Not a complete UVPapp project, missing folder(s): {', '.join(missing)}"
 
-# The ALR netCDFs go to meta/, next to the sample file: raw, config and meta
+# The phase netCDFs go to meta/, next to the sample file: raw, config and meta
 # are the folders kept and backed up for a UVP project
-meta_dir = project / "meta" / f"alr_meta_sn{ALR_SERIAL_NUMBER:03d}"
+meta_dir = project / "meta" / auv_data.meta_folder_name(VEHICLE_NAMESN)
 meta_dir.mkdir(exist_ok=True)
 
 cruise_info = project / "config" / "cruise_info.txt"
 if not cruise_info.exists():
     cruise_info.write_text(f"UVP project cruise info \n\
-                           name: {CRUISE}\n",
+                           name: {CRUISE_NAMEID}\n",
                            encoding="latin-1")
 
 # netCDFs of a previous run are moved to archives/, as cell 4 reads every .nc of meta_dir
@@ -109,9 +130,9 @@ if old_nc:
         shutil.move(str(f), str(archive / f.name))
     print(f"Moved {len(old_nc)} netCDF(s) of the previous run to {archive}")
 
-written = alr_data.export_alr_netcdf(
+written = auv_data.export_auv_netcdf(
     df,
-    alr_serial=ALR_SERIAL,
+    vehicle_name=VEHICLE_NAMESN,
     output_dir=str(meta_dir),
     max_files=None,
 )
@@ -122,7 +143,8 @@ print(f"Written {len(written)} phase netCDF(s) to {meta_dir}")
 # %% 4. Generate the UVPapp sample file (header file)
 # ==========
 sample_file = create_samples(project,
-                             cruise=CRUISE,
+                             cruise=CRUISE_NAMEID,
+                             ship=SHIP_NAME,
                              plots_dir=out_dir,
                              depth_integration=DEPTH_INTEGRATION,
                              time_integration=TIME_INTEGRATION,

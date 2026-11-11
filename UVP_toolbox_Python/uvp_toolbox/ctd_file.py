@@ -24,7 +24,7 @@ __all__ = [
     "CTD_COLUMN_NAMES",
     "create_ctd_file",
     "write_table_tab",
-    "fill_ctd_table_alr",
+    "fill_ctd_table_auv",
     "fill_ctd_table_float",
     "fill_ctd_table_seaexplorer",
     "fill_ctd_table_seaglider",
@@ -81,8 +81,8 @@ def write_table_tab(df: pd.DataFrame, path, encoding: str = "latin-1") -> None:
 # FillCTDtable*
 # ---------------------------------------------------------------------------
 
-def fill_ctd_table_alr(ctd_table: pd.DataFrame, data_table: pd.DataFrame) -> pd.DataFrame:
-    """Fill from an ALR segment table (``TIME``, ``DEPTH_SCI``, optional
+def fill_ctd_table_auv(ctd_table: pd.DataFrame, data_table: pd.DataFrame) -> pd.DataFrame:
+    """Fill from an AUV segment table (``TIME``, ``DEPTH_SCI``, optional
     ``SCI_PRESS``/``LAT``/``LON``/``TEMPERATURE``/``CONDUCTIVITY``).  Pressure
     falls back to depth 1:1 when ``SCI_PRESS`` is absent.  Temperature and
     conductivity come from the SBE 52-MP (deg C, mS/cm); oxygen, whose unit
@@ -203,7 +203,7 @@ _FILLERS: dict[str, Callable[[pd.DataFrame, pd.DataFrame], pd.DataFrame]] = {
     "float": fill_ctd_table_float,
     "SeaExplorer": fill_ctd_table_seaexplorer,
     "SeaGlider": fill_ctd_table_seaglider,
-    "ALR": fill_ctd_table_alr,
+    "AUV": fill_ctd_table_auv,
 }
 
 

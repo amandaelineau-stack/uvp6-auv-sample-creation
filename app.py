@@ -1,4 +1,4 @@
-"""ALR–UVP6 pipeline in the browser: the four cells of run_UVP_toolbox.py behind a form.
+"""AUV–UVP6 pipeline in the browser: the four cells of run_UVP_toolbox.py behind a form.
 
 Start it with start_app.bat (Windows) or:  python -m streamlit run app.py
 Everything runs on this computer; no data leaves it.
@@ -21,28 +21,34 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from PIL import Image
 
-import alr_data
-import alr_plots
+import auv_data
+import auv_plots
 from uvp_toolbox.create_samples import create_samples
 from uvp_toolbox.prompts import NullPrompter
 
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
-                    "livecamera", "log", "meta", "raw", "results")
+                    "livecamera", "log", "meta", "raw")
+ALR_FORMAT, CSV_FORMAT = "ALR CTD and NAV files", "Simple CSV files (any AUV)"
 BUTTON_WIDTH = 420  # px, the Run and Download buttons
 
-st.set_page_config(page_title="ALR–UVP6 pipeline", page_icon=Image.open(REPO / "alr_app.ico"), layout="wide")
+st.set_page_config(page_title="AUV–UVP6 pipeline", page_icon=Image.open(REPO / "auv_app.ico"), layout="wide")
 
 
 # ---------------------------------------------------------------- folders
 def browse(key):
-    """Folder dialog of this computer (the app runs locally)."""
+    """Folder dialog of this computer (the app runs locally); a file dialog for the CSV file."""
     import tkinter as tk
     from tkinter import filedialog
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", 1)
     start = st.session_state.get(key) or str(Path.home())
-    path = filedialog.askdirectory(initialdir=start, parent=root)
+    if key == "csv":
+        start = str(Path(start).parent) if Path(start).is_file() else start
+        path = filedialog.askopenfilename(initialdir=start, parent=root, title="Choose the CSV file of the AUV",
+                                          filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+    else:
+        path = filedialog.askdirectory(initialdir=start, parent=root)
     root.destroy()
     if path:
         st.session_state[key] = str(Path(path))
@@ -51,33 +57,48 @@ def browse(key):
 
 
 def fill_from_deployment(folder):
-    """ALR4_demo layout: <serial>_ctd_data, <serial>_nav_data, uvp6_* and a figures folder."""
+    """ALR4_demo layout: <vehicle>_ctd_data, <vehicle>_nav_data (or <vehicle>_csv_data), uvp6_* and a figures
+    folder."""
     st.session_state["deployment_note"] = ""
     if folder.name.lower().startswith("uvp6_") or all((folder / d).is_dir() for d in ("raw", "meta")):
-        # the UVP6 project itself was chosen: the ALR folders are elsewhere
+        # the UVP6 project itself was chosen: the AUV data folders are elsewhere
         st.session_state["project"] = str(folder)
         st.session_state["figures"] = str(folder / "diagnostic_figures")
         st.session_state["deployment_note"] = (
             "This folder is the UVP6 project itself: it is used as the UVP6 project folder. "
-            "Choose the ALR CTD and NAV folders below (or choose the folder that holds the three of them).")
-        m = re.search(r"_alr(\d+)", folder.name.lower())
-        if m:
-            st.session_state["serial"] = int(m.group(1))
+            "Choose the AUV data folders below (or choose the folder that holds them and the project).")
+        st.session_state["vehicle"] = guess_vehicle(folder.name) or st.session_state["vehicle"]
         return
     subs = [p for p in folder.iterdir() if p.is_dir()]
     pick = lambda test: next((str(p) for p in subs if test(p.name.lower())), "")
     st.session_state["ctd"] = pick(lambda n: n.endswith("ctd_data")) or st.session_state.get("ctd", "")
     st.session_state["nav"] = pick(lambda n: n.endswith("nav_data")) or st.session_state.get("nav", "")
+    loose_csv = sorted(p for p in folder.glob("*.csv") if p.is_file())  # CSV files directly in the deployment folder
+    st.session_state["csv"] = (pick(lambda n: n.endswith(("csv_data", "vehicle_data")))
+                               or (str(loose_csv[0]) if len(loose_csv) == 1 else str(folder) if loose_csv else "")
+                               or st.session_state.get("csv", ""))
+    if st.session_state["csv"] and not st.session_state["ctd"]:
+        st.session_state["vformat"] = CSV_FORMAT
     st.session_state["project"] = pick(lambda n: n.startswith("uvp6_")) or st.session_state.get("project", "")
     st.session_state["figures"] = pick(lambda n: "figure" in n) or str(folder / "diagnostic_figures")
-    m = re.match(r"alr(\d+)_", Path(st.session_state["ctd"]).name.lower()) if st.session_state["ctd"] else None
-    m = m or re.search(r"_alr(\d+)", Path(st.session_state["project"]).name.lower())
+    data = st.session_state["csv"] if st.session_state["vformat"] == CSV_FORMAT else st.session_state["ctd"]
+    data = str(Path(data).parent) if data and Path(data).is_file() else data
+    st.session_state["vehicle"] = (guess_vehicle(Path(data).name if data else "")
+                                   or guess_vehicle(Path(st.session_state["project"]).name)
+                                   or st.session_state["vehicle"])
+
+
+def guess_vehicle(name):
+    """AUV name from a folder name: ALR004_ctd_data, ALR004_csv_data -> ALR004; uvp6_…_alr4 -> ALR004."""
+    m = re.match(r"([A-Za-z0-9]+)_(?:ctd|nav|csv|vehicle)_data$", name)
     if m:
-        st.session_state["serial"] = int(m.group(1))
+        return m.group(1)
+    m = re.search(r"_alr(\d+)$", name.lower())
+    return f"ALR{int(m.group(1)):03d}" if m else ""
 
 
 def folder_input(label, key, help_, on_change=None, status=None):
-    """Folder field; `status` = (ok, text) is shown in its title, green when ok, red otherwise."""
+    """Folder (or file) field; `status` = (ok, text) is shown in its title, green when ok, red otherwise."""
     if status is not None:
         ok, text = status
         label = f":green[✅ **{label}** · {text}]" if ok else f":red[⚠️ **{label}** · {text}]"
@@ -92,8 +113,33 @@ def files_status(folder, pattern):
         return False, "not chosen yet"
     if not folder.is_dir():
         return False, "folder not found"
-    n = len(alr_data.list_data_files(folder, pattern))
+    n = len(auv_data.list_data_files(folder, pattern))
     return n > 0, f"{n} {pattern[1:]} file{'s' if n != 1 else ''} found" if n else f"no {pattern[1:]} file in this folder"
+
+
+def csv_files(path):
+    """The CSV file chosen, or every .csv file of the folder chosen."""
+    return [path] if path.is_file() else sorted(auv_data.list_data_files(path, "*.csv"))
+
+
+def csv_status(path):
+    """Simple CSV file(s) of the AUV: found, and with the required columns."""
+    if path and path.is_file():
+        if path.suffix.lower() != ".csv":
+            return False, "not a .csv file"
+        ok, text = True, "1 .csv file"
+    else:
+        ok, text = files_status(path, "*.csv")
+    if not ok:
+        return ok, text
+    for f in csv_files(path):
+        try:
+            missing = auv_data.simple_csv_missing_columns(f)
+        except Exception as e:  # unreadable file
+            return False, f"{Path(f).name} cannot be read: {e}"
+        if missing:
+            return False, f"{Path(f).name} has no column {', '.join(missing)}"
+    return True, text + ", columns found"
 
 
 def project_status(project):
@@ -110,10 +156,10 @@ def project_status(project):
     if n != 1:
         return False, (f"{n} sequences in raw/: merge them in UVPapp first" if n else "no UVP6 sequence in raw/")
     # netCDF (HDF5) cannot write past the 260-character Windows path limit
-    longest = len(str(project.resolve() / "meta" / "alr_meta_sn000" / "archives" / "ALR000_yyyymmdd_0000_0000_x0000.nc"))
+    longest = len(str(project.resolve() / "meta" / "auv_meta_alr000" / "archives" / "ALR000_yyyymmdd_0000_0000_x0000.nc"))
     if longest > 259:
         return False, (f"path too long for Windows ({longest} > 259 characters for the netCDF files): "
-                       "move the deployment folder to a shorter path, e.g. C:\\ALR")
+                       "move the deployment folder to a shorter path, e.g. C:\\data")
     return True, "complete UVPapp project, 1 sequence in raw/" + (f" ({used} merged sequences ignored)" if used else "")
 
 
@@ -124,33 +170,36 @@ def figures_status(figures):
 
 
 # ---------------------------------------------------------------- pipeline
-def run_pipeline(ctd, nav, project, figures, serial, cruise, depth_int, time_int, thresholds, log):
-    """The four cells of run_UVP_toolbox.py. `log` receives the printed text of each step."""
-    alr = f"ALR{serial:03d}"
+def run_pipeline(vehicle, project, figures, name, cruise, ship, depth_int, time_int, thresholds, log):
+    """The four cells of run_UVP_toolbox.py. `vehicle` = ("ALR", ctd, nav) or ("CSV", csv file or folder).
+    `log` receives the printed text of each step."""
     figures.mkdir(parents=True, exist_ok=True)
     out = {}
 
-    with st.status("1. Load and parse the ALR data (CTD and NAV)", expanded=False) as s:
+    with st.status("1. Load and parse the vehicle data", expanded=False) as s:
         with capture(log, "1"):
-            big_df = alr_data.load_all_files(sorted(alr_data.list_data_files(ctd, "*.log")),
-                                             sorted(alr_data.list_data_files(nav, "*.csv")), verbose=True)
-        s.update(label=f"1. ALR data loaded: {big_df.height:,} records", state="complete")
+            if vehicle[0] == "CSV":
+                big_df = auv_data.load_simple_csv(csv_files(vehicle[1]), verbose=True)
+            else:
+                big_df = auv_data.load_alr_files(sorted(auv_data.list_data_files(vehicle[1], "*.log")),
+                                                 sorted(auv_data.list_data_files(vehicle[2], "*.csv")), verbose=True)
+        s.update(label=f"1. Vehicle data loaded: {big_df.height:,} records", state="complete")
 
-    with st.status("2. Identify the ALR phases", expanded=False) as s:
+    with st.status("2. Identify the AUV phases", expanded=False) as s:
         with capture(log, "2"):
-            df, profiles_df = alr_data.detect_profiles(big_df, **thresholds)
-            df = alr_data.attach_profiles(df, profiles_df)
-            fig, _ = alr_plots.plot_phase_detection(profiles_df, **thresholds, show=False)
-            fig.savefig(figures / f"{alr}_phase_detection.png", dpi=150)
-            fig, _ = alr_plots.plot_phase_sectioning(df, show=False)
-            fig.savefig(figures / f"{alr}_phase_sectioning.png", dpi=150)
+            df, profiles_df = auv_data.detect_profiles(big_df, **thresholds)
+            df = auv_data.attach_profiles(df, profiles_df)
+            fig, _ = auv_plots.plot_phase_detection(profiles_df, **thresholds, show=False)
+            fig.savefig(figures / f"{name}_phase_detection.png", dpi=150)
+            fig, _ = auv_plots.plot_phase_sectioning(df, show=False)
+            fig.savefig(figures / f"{name}_phase_sectioning.png", dpi=150)
             plt.close("all")
-            out["phase_warnings"] = alr_plots.check_phases(df)
-        s.update(label="2. ALR phases identified", state="complete")
+            out["phase_warnings"] = auv_plots.check_phases(df)
+        s.update(label="2. AUV phases identified", state="complete")
 
-    with st.status("3. Generate one netCDF file per ALR phase", expanded=False) as s:
+    with st.status("3. Generate one netCDF file per AUV phase", expanded=False) as s:
         with capture(log, "3"):
-            meta_dir = project / "meta" / f"alr_meta_sn{serial:03d}"
+            meta_dir = project / "meta" / auv_data.meta_folder_name(name)
             meta_dir.mkdir(exist_ok=True)
             cruise_info = project / "config" / "cruise_info.txt"
             if not cruise_info.exists() and cruise:
@@ -162,13 +211,13 @@ def run_pipeline(ctd, nav, project, figures, serial, cruise, depth_int, time_int
                 for f in old_nc:
                     shutil.move(str(f), str(archive / f.name))
                 print(f"Moved {len(old_nc)} netCDF(s) of the previous run to {archive}")
-            written = alr_data.export_alr_netcdf(df, alr_serial=alr, output_dir=str(meta_dir), max_files=None)
+            written = auv_data.export_auv_netcdf(df, vehicle_name=name, output_dir=str(meta_dir), max_files=None)
         out["n_netcdf"], out["meta_dir"] = len(written), meta_dir
         s.update(label=f"3. {len(written)} phase netCDF files written", state="complete")
 
     with st.status("4. Generate the UVPapp sample file", expanded=False) as s:
         with capture(log, "4"):
-            out["sample_file"] = create_samples(project, cruise=cruise or None, plots_dir=figures,
+            out["sample_file"] = create_samples(project, cruise=cruise or None, ship=ship or None, plots_dir=figures,
                                                 depth_integration=depth_int, time_integration=time_int,
                                                 prompter=NullPrompter(), assume_yes=True)
             plt.close("all")
@@ -187,11 +236,12 @@ def capture(log, step):
 
 
 # ---------------------------------------------------------------- page
-st.title("ALR–UVP6 sample creation")
-st.caption("Creates the UVPapp sample file of a UVP6 deployment on an Autosub Long Range (ALR) vehicle, "
-           "from the ALR CTD and navigation files and the UVP6 project. Everything runs on this computer.")
+st.title("AUV–UVP6 sample creation")
+st.caption("Creates the UVPapp sample file of a UVP6 deployment on an autonomous underwater vehicle (AUV), "
+           "such as the Autosub Long Range (ALR), from the AUV data (ALR CTD and navigation files, or simple "
+           "CSV files) and the UVP6 project. Everything runs on this computer.")
 
-for k, v in (("deployment", ""), ("ctd", ""), ("nav", ""), ("project", ""), ("figures", ""), ("serial", 4)):
+for k, v in (("deployment", ""), ("ctd", ""), ("nav", ""), ("csv", ""), ("vformat", ALR_FORMAT), ("project", ""), ("figures", ""), ("vehicle", "ALR004")):
     st.session_state.setdefault(k, v)
 # the deployment folder can be given in the address: http://localhost:8501/?deployment=C:\ALR\ALR4_demo
 from_url = st.query_params.get("deployment", "")
@@ -203,28 +253,49 @@ st.header("1 · Choose the data folders")
 st.write("Choose the folder of the deployment (as **ALR4_demo**): the four folders below are found in it. "
          "You can also choose each folder yourself. Each title turns green once its folder is ready.")
 folder_input("Deployment folder", "deployment",
-             "Folder holding <serial>_ctd_data, <serial>_nav_data and the uvp6_… project",
+             "Folder holding <vehicle>_ctd_data and <vehicle>_nav_data (or the CSV file of the AUV) and the uvp6_… project",
              on_change=lambda: Path(st.session_state["deployment"]).is_dir()
              and fill_from_deployment(Path(st.session_state["deployment"])))
 if st.session_state.get("deployment_note"):
     st.info(st.session_state["deployment_note"])
 as_path = lambda key: Path(st.session_state[key]) if st.session_state.get(key) else None
-statuses = [files_status(as_path("ctd"), "*.log"), files_status(as_path("nav"), "*.csv"),
-            project_status(as_path("project")), figures_status(as_path("figures"))]
+csv_mode = st.session_state["vformat"] == CSV_FORMAT
+statuses = ([csv_status(as_path("csv"))] if csv_mode else
+            [files_status(as_path("ctd"), "*.log"), files_status(as_path("nav"), "*.csv")])
+statuses += [project_status(as_path("project")), figures_status(as_path("figures"))]
 ok = all(good for good, _ in statuses)
 with st.container(border=True):
-    ctd = folder_input("ALR CTD folder", "ctd", "Every .log file directly in this folder is read", status=statuses[0])
-    nav = folder_input("ALR NAV folder", "nav", "Every .csv file directly in this folder is read", status=statuses[1])
+    st.radio("AUV data format", (ALR_FORMAT, CSV_FORMAT), key="vformat", horizontal=True,
+             help="Simple CSV: one or more .csv files with the columns time (Unix seconds or ISO 8601 UTC), "
+                  "pressure (dbar) or depth (m), pitch (degrees), latitude, longitude; optional temperature, "
+                  "conductivity, oxygen, roll")
+    if csv_mode:
+        st.caption("Click **Browse…** to choose the CSV file of the AUV. If the data are split into several CSV "
+                   "files, type instead the path of the folder that holds them: every .csv file in it is read.")
+        vehicle = ("CSV", folder_input("AUV CSV file", "csv",
+                                       "One .csv file, or a folder: every .csv file directly in it is read",
+                                       status=statuses[0]))
+    else:
+        vehicle = ("ALR", folder_input("ALR CTD folder", "ctd", "Every .log file directly in this folder is read",
+                                       status=statuses[0]),
+                   folder_input("ALR NAV folder", "nav", "Every .csv file directly in this folder is read",
+                                status=statuses[1]))
     project = folder_input("UVP6 project folder (UVPapp)", "project",
-                           "uvp6_<serial>_<date>_<cruise>_<platform>: a complete UVPapp project, sequences merged",
-                           status=statuses[2])
-    figures = folder_input("Figures folder", "figures", "Where the figures are saved", status=statuses[3])
+                           "uvp6_<sn>_<date>_<cruise>_<platform>: a complete UVPapp project, sequences merged",
+                           status=statuses[-2])
+    figures = folder_input("Figures folder", "figures", "Where the figures are saved", status=statuses[-1])
 
 st.header("2 · Check the processing settings")
-c1, c2, c3, c4 = st.columns(4)
-serial = c1.number_input("ALR serial number", min_value=1, max_value=999, step=1, key="serial",
-                         help="4 gives ALR004")
-cruise = c2.text_input("Cruise", help="Leave empty to read it from config/cruise_info.txt")
+c1, c2, c5, c3, c4 = st.columns(5)
+c1.text_input("AUV name and serial number", key="vehicle",
+              help="Letters, digits and _, e.g. ALR004: starts the netCDF and figure names and is written to "
+                   "the sample file. Found from the name of the data folder when possible")
+name_ok = bool(re.fullmatch(r"\w+", st.session_state["vehicle"].strip(), re.ASCII))
+if not name_ok:
+    c1.caption(":red[AUV name and serial number: letters, digits and _ only]")
+cruise = c2.text_input("Cruise name and ID", help="e.g. DY180Biocarbon1. Leave empty to read it from config/cruise_info.txt")
+ship = c5.text_input("Ship", help="Ship of the cruise, e.g. Discovery, written to the 'ship' column of the sample "
+                                  "file. Leave empty to write the AUV name and serial number instead")
 depth_int = c3.number_input("Depth bin of d/u/x samples (m)", min_value=1, value=5,
                             help="Sample file 'integrationtime' of depth-integrated samples")
 time_int = c4.number_input("Time bin of t/s samples (s)", min_value=60, value=3600, step=60,
@@ -238,19 +309,19 @@ with st.expander("Phase detection thresholds (advanced)"):
 thresholds = dict(gradient_thresholds=[g, -g], cust_gradient_thresholds=[cg, -cg])
 
 st.header("3 · Run the pipeline")
-st.write("The four steps run one after the other: load the ALR data, identify the ALR phases, write one "
+st.write("The four steps run one after the other: load the AUV data, identify the AUV phases, write one "
          "netCDF file per phase, and create the sample header file for UVPapp.")
 if project and (project / "meta").is_dir() and any((project / "meta").glob("uvp6_header_*.txt")):
     st.info("This project already has a sample file: it will be moved to meta/archives/, "
-            "and the phase netCDF files of the previous run to meta/alr_meta_sn…/archives/.", icon="ℹ️")
+            "and the phase netCDF files of the previous run to meta/auv_meta_…/archives/.", icon="ℹ️")
 if not ok:
     st.caption(":red[Choose the folders above first: the button is enabled once all their titles are green.]")
-if st.button("Run the pipeline", type="primary", disabled=not ok, width=BUTTON_WIDTH):
+if st.button("Run the pipeline", type="primary", disabled=not (ok and name_ok), width=BUTTON_WIDTH):
     log = {}
     try:
-        res = run_pipeline(ctd, nav, project, figures, int(serial), cruise.strip(), depth_int, time_int,
+        res = run_pipeline(vehicle, project, figures, st.session_state["vehicle"].strip(), cruise.strip(), ship.strip(), depth_int, time_int,
                            thresholds, log)
-        st.session_state["result"] = dict(res, figures=figures, log=log, serial=int(serial))
+        st.session_state["result"] = dict(res, figures=figures, log=log, vehicle=st.session_state["vehicle"].strip())
         st.session_state.pop("error", None)
     except Exception as e:  # shown in the page, with the log of the steps that ran
         st.session_state["error"] = (f"{type(e).__name__}: {e}", log)
@@ -267,7 +338,7 @@ if "error" in st.session_state:
 res = st.session_state.get("result")
 if res:
     st.header("4 · Results: sample header file, checks and figures")
-    fig_dir, alr = res["figures"], f"ALR{res['serial']:03d}"
+    fig_dir, name = res["figures"], res["vehicle"]
     sample = res["sample_file"]
     st.download_button("Download the sample header file for UVPapp", sample.read_bytes(), file_name=sample.name,
                        type="primary", width=BUTTON_WIDTH)
@@ -283,7 +354,7 @@ if res:
             if f.suffix.lower() in (".png", ".txt", ".csv"):
                 z.write(f, f.relative_to(fig_dir))
     st.download_button("Download all figures and QC files (zip)", zipped.getvalue(),
-                       file_name=f"{alr}_figures.zip", mime="application/zip", width=BUTTON_WIDTH)
+                       file_name=f"{name}_figures.zip", mime="application/zip", width=BUTTON_WIDTH)
 
     def show(name, cap):
         path = fig_dir / name
@@ -296,21 +367,21 @@ if res:
     with t1:
         for w in res["phase_warnings"]:
             st.warning(w)
-        show(f"{alr}_phase_sectioning.png", "Phase sectioning: one block per phase (one netCDF file, one sample)")
-        show(f"{alr}_phase_detection.png", "Phase detection: the two criteria and their thresholds")
+        show(f"{name}_phase_sectioning.png", "Phase sectioning: one block per phase (one netCDF file, one sample)")
+        show(f"{name}_phase_detection.png", "Phase detection: the two criteria and their thresholds")
     with t2:
         summary = fig_dir / "qc_summary.txt"
         if summary.exists():
             text = summary.read_text(encoding="utf-8")
             (st.warning if "WARNING" in text else st.info)("Summary of the quality checks (qc_summary.txt)")
             st.code(text)
-        show("uvp_alr_depth_agreement.png", "Depth agreement between the UVP6 and the ALR")
-        show("uvp_alr_coverage_map.png", "UVP6 coverage: ALR track, red where the UVP6 has no image")
-        show("uvp_alr_sample_sizes.png", "Number of images per sample")
+        show("uvp_auv_depth_agreement.png", "Depth agreement between the UVP6 and the AUV")
+        show("uvp_auv_coverage_map.png", "UVP6 coverage: AUV track, red where the UVP6 has no image")
+        show("uvp_auv_sample_sizes.png", "Number of images per sample")
     with t3:
-        show("uvp_alr_timedepth_fullspan.png", "UVP6 and ALR depth over the deployment")
-        show("overview_plots/uvp_alr_timedepth_all_days.png", "One panel per day")
-        show("uvp_alr_sampling_intervals.png", "Sampling intervals")
+        show("uvp_auv_timedepth_fullspan.png", "UVP6 and AUV depth over the deployment")
+        show("overview_plots/uvp_auv_timedepth_all_days.png", "One panel per day")
+        show("uvp_auv_sampling_intervals.png", "Sampling intervals")
     with t4:
         for step, text in res["log"].items():
             with st.expander(f"Messages of step {step}"):

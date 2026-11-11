@@ -1,4 +1,4 @@
-"""Locate the vehicle metadata folder inside a UVP project (``meta`` for ALR, ``doc`` otherwise).
+"""Locate the vehicle metadata folder inside a UVP project (``meta`` for AUV, ``doc`` otherwise).
 
 Translation of ``UVP6_samples_creation/DetectionVectorMetaFile.m``.
 
@@ -23,7 +23,7 @@ def detection_vector_meta_file(project_folder, vector_type: str) -> tuple[Path, 
 
     ``vector_sn`` is the platform label written to the ``ship`` column of the
     sample file (``Seaeplorer_###``, ``SeaGlider_###``, ``WMO#######`` or
-    ``ALR###``).
+    the AUV name, e.g. ``ALR004``).
     """
     doc = Path(project_folder) / "doc"
 
@@ -42,24 +42,29 @@ def detection_vector_meta_file(project_folder, vector_type: str) -> tuple[Path, 
         if not hits:
             raise FileNotFoundError("ERROR : No metadata folder found in \\doc")
         vector_sn = "WMO" + hits[0].name[-7:]
-    elif vector_type == "ALR":
-        # meta/ since #11; doc/ is still read for projects processed before
-        hits = sorted((Path(project_folder) / "meta").glob("alr_meta_sn*")) or sorted(doc.glob("alr_meta_sn*"))
+    elif vector_type == "AUV":
+        # meta/auv_meta_<vehicle>; older projects: meta/alr_meta_sn<NNN>, or doc/ before #11
+        meta = Path(project_folder) / "meta"
+        hits = (sorted(meta.glob("auv_meta_*")) or sorted(meta.glob("alr_meta_sn*"))
+                or sorted(doc.glob("alr_meta_sn*")))
         if not hits:
-            raise FileNotFoundError('ERROR : No ALR metadata folder found in \\meta (expected "alr_meta_sn*")')
-        m = re.search(r"sn(\d+)", hits[0].name)
-        if m:
-            vector_sn = "ALR%03d" % int(m.group(1))
-        else:
-            nc_list = sorted(hits[0].glob("*.nc"))
-            if not nc_list:
-                raise FileNotFoundError("ERROR: ALR meta folder contains no .nc files")
+            raise FileNotFoundError('ERROR : No AUV metadata folder found in \\meta (expected "auv_meta_<vehicle>")')
+        # the vehicle name is a global attribute of the phase netCDFs (alr_serial in older ones)
+        vector_sn = None
+        nc_list = sorted(hits[0].glob("*.nc")) if hits[0].is_dir() else []
+        if nc_list:
             try:
                 with netCDF4.Dataset(nc_list[0], "r") as ds:
-                    vector_sn = re.sub(r"[^\w]", "", str(ds.getncattr("alr_serial")))
-            except Exception:
-                warnings.warn('Could not read alr_serial; using "ALR".')
-                vector_sn = "ALR"
+                    attrs = ds.ncattrs()
+                    attr = next((a for a in ("vehicle_name", "alr_serial") if a in attrs), None)
+                    if attr:
+                        vector_sn = re.sub(r"[^\w]", "", str(ds.getncattr(attr)))
+            except OSError:
+                pass
+        if not vector_sn:  # from the folder name
+            m = re.search(r"alr_meta_sn(\d+)", hits[0].name)
+            vector_sn = ("ALR%03d" % int(m.group(1)) if m
+                         else hits[0].name[len("auv_meta_"):].upper() or "AUV")
     else:
         raise ValueError(f"Unknown vector type {vector_type!r}")
 
