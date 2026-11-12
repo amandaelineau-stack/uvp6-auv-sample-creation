@@ -442,10 +442,11 @@ def load_simple_csv(files, verbose=False):
         time        Unix time in seconds, or ISO 8601 date-time in UTC (e.g. 2024-06-11T03:34:00Z)
         pressure    in dbar, or depth in m (pressure is used when both are given; otherwise the
                     pressure is computed from the depth with TEOS-10, gsw.p_from_z)
-        pitch       in degrees
+        pitch       in degrees (converted to radians, the unit of the ALR navigation files and of
+                    the thresholds of the phase detection)
         latitude, longitude   in decimal degrees
-    and optionally temperature, conductivity, oxygen and roll, kept in the netCDF and CTD files.
-    Other columns are ignored.
+    and optionally temperature, conductivity, oxygen and roll (degrees, converted to radians), kept
+    in the netCDF and CTD files. Other columns are ignored.
 
     Produces the same shape of dataframe as load_alr_files().
     """
@@ -466,6 +467,8 @@ def load_simple_csv(files, verbose=False):
         df = df.with_columns(t.alias("time"))
         df = df.with_columns([pl.col(c).cast(pl.Float64) for c in df.columns if c != "time"])
         df = df.rename({c: known[c] for c in df.columns})
+        # angles in degrees in the CSV, in radians in the pipeline (as in the ALR navigation files)
+        df = df.with_columns([(pl.col(c) * (np.pi / 180)).alias(c) for c in ("pitch", "roll") if c in df.columns])
         if "Pressure" not in df.columns:
             df = df.sort("Timestamp")
             df = df.with_columns(pressure_from_depth(df, "depth", "Timestamp"))

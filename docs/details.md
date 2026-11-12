@@ -28,7 +28,7 @@ sorted by time. In the app, **Browse…** chooses the CSV file (or type the path
 | --- | --- | --- |
 | `time` | Unix time in s, or ISO 8601 date-time in UTC (`2024-06-11T03:34:00Z`) | required |
 | `pressure` or `depth` | dbar, or m (pressure is used when both are given; otherwise the pressure is computed from the depth with TEOS-10, `gsw.p_from_z`) | required |
-| `pitch` | degrees | required |
+| `pitch` | degrees (converted to radians, the unit of the ALR navigation files and of the detection thresholds) | required |
 | `latitude`, `longitude` | decimal degrees | required |
 | `temperature`, `conductivity`, `oxygen`, `roll` | as in the ALR files | optional, kept in the netCDF and CTD files |
 
