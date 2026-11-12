@@ -3,6 +3,7 @@ pandas>=2.0
 polars>=1.0  # tested with 1.44 and 2.1
 pyarrow  # needed by polars' to_pandas(), used when exporting the ALR netCDFs
 xarray
+gsw>=3.6  # TEOS-10: depth from pressure (gsw.z_from_p)
 netCDF4>=1.6
 matplotlib>=3.7
 ipykernel  # Run Cell / Interactive Window in VS Code (Jupyter extension)

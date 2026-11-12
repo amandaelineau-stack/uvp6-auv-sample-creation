@@ -255,7 +255,7 @@ def plot_phase_detection(
     ax = axs[0]
     _scatter_by_phase(ax, t, col("INTERP_DEPTH"), types)
     ax.invert_yaxis()
-    ax.set_ylabel("Depth (dbar)")
+    ax.set_ylabel("Depth (m)")
     ax.set_title("Phases detected", loc="left")
 
     ax = axs[1]
@@ -265,7 +265,7 @@ def plot_phase_detection(
     _scatter_by_phase(ax, t, w, types)
     lo, hi = np.nanpercentile(w_raw, [0.5, 99.5])
     ax.set_ylim(min(lo, 2 * neg), max(hi, 2 * pos))
-    ax.set_ylabel("Vertical velocity\n(dbar s⁻¹)")
+    ax.set_ylabel("Vertical velocity\n(m s⁻¹)")
     ax.set_title(f"Criterion 1 – smoothed vertical velocity w̃ (raw in grey): "
                  f"profile when w̃ is outside the grey band [{neg:g}, {pos:g}]", loc="left")
 
@@ -401,9 +401,9 @@ def plot_phase_sectioning(big_df_with_profiles, surface_thresh=5.0, show=True):
     for s, e, k in runs:
         ax.plot(t[s:e], z[s:e], color=PHASE_COLOURS[k], lw=1.4)
     ax.invert_yaxis()
-    ax.set_ylabel("Depth (dbar)")
+    ax.set_ylabel("Depth (m)")
     ax.axhline(surface_thresh, color="0.6", ls="--", lw=0.8)
-    ax.text(0.995, surface_thresh, f"surface threshold {surface_thresh:g} dbar", transform=ax.get_yaxis_transform(),
+    ax.text(0.995, surface_thresh, f"surface threshold {surface_thresh:g} m", transform=ax.get_yaxis_transform(),
             ha="right", va="bottom", fontsize=8, color="0.4")
 
     x = mdates.date2num(t)
