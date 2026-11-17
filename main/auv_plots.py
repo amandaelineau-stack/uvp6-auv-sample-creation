@@ -273,10 +273,12 @@ def plot_phase_detection(
     if smooth_name in profiles_df.columns:
         theta = col(smooth_name)
         ax = axs[2]
+        # pitch is in radians in the data and in criterion 2; shown in degrees
+        to_shown, unit = (np.degrees, " (°)") if custom_column == "pitch" else ((lambda v: v), "")
         if custom_column in profiles_df.columns:
-            ax.plot(t, col(custom_column), color="0.75", lw=0.4, zorder=1, rasterized=True)
-        _scatter_by_phase(ax, t, theta, types)
-        ax.set_ylabel(f"{custom_column.capitalize()}")
+            ax.plot(t, to_shown(col(custom_column)), color="0.75", lw=0.4, zorder=1, rasterized=True)
+        _scatter_by_phase(ax, t, to_shown(theta), types)
+        ax.set_ylabel(f"{custom_column.capitalize()}{unit}")
         ax.set_title(f"Smoothed {custom_column} θ̃ (raw in grey)", loc="left")
 
         ax = axs[3]
@@ -285,7 +287,7 @@ def plot_phase_detection(
         _scatter_by_phase(ax, t, m, types)
         lo, hi = np.nanpercentile(m, [0.5, 99.5])
         ax.set_ylim(min(lo, 2 * cneg), max(hi, 4 * cpos))
-        ax.set_ylabel("M = −θ̃ · w̃")
+        ax.set_ylabel("M = −θ̃ · w̃\n(rad m s⁻¹)" if custom_column == "pitch" else "M = −θ̃ · w̃")
         ax.set_title(f"Criterion 2 – product M (Eq. 2): profile when M is outside the grey band "
                      f"[{cneg:g}, {cpos:g}]; a transect also needs M < {cpos:g}", loc="left")
     else:

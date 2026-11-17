@@ -28,6 +28,11 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 
+try:  # TEOS-10, for the unit reference of the depth agreement
+    import gsw
+except ImportError:  # pragma: no cover
+    gsw = None
+
 from .diagnostics import BinnedDepths, bin_depths, _concat_series, _day_floor
 from .get_meta_from_vector_meta_file import AuvMatch
 from .matlab_compat import finite_times
@@ -54,6 +59,20 @@ OFFSET_TOL_M = 0.5      # |offset| above this: sensor zero, or distance between 
 LAG_TOL_S = 1.0         # |lag| above this: clock offset between the UVP and the AUV
 # A depth in metres of fresh water (mH2O) against a pressure in dbar reads this much deeper
 MH2O_PER_DBAR_PCT = 1.97
+MH2O_PER_DBAR = 1.0197
+
+
+def unit_reference_pct(z, lat=None):
+    """How much deeper (% of depth) a UVP depth in metres of fresh water reads than the AUV depth
+    when units alone differ. The AUV depth is in m from the pressure with TEOS-10 (#37): back to
+    pressure with gsw.p_from_z at the latitude `lat`, then x 1.0197; median over depths > 10 m.
+    Without latitude or gsw: +1.97 % (AUV depth = pressure in dbar)."""
+    z = np.asarray(z, dtype=float)
+    z = z[np.isfinite(z) & (z > 10)]
+    if gsw is None or lat is None or not np.isfinite(lat) or not z.size:
+        return MH2O_PER_DBAR_PCT
+    p = gsw.p_from_z(-z, lat)
+    return float(np.median(100 * (MH2O_PER_DBAR * p - z) / z))
 # Consecutive phases without UVP image are listed as a gap from this duration on
 MIN_GAP_HOURS = 1.0
 C_GAP = "#b3261e"
@@ -71,12 +90,13 @@ class DepthAgreement:
     rms_m: float            # what the model leaves unexplained
     n_bins: int
     days: list[dict] = field(default_factory=list)   # the same, per day
+    ref_pct: float = MH2O_PER_DBAR_PCT                # scale given by the units alone
 
     def warnings(self) -> list[str]:
         out = []
         if abs(self.scale_pct) > SCALE_TOL_PCT:
-            hint = (f" (a mH2O vs dbar unit difference gives +{MH2O_PER_DBAR_PCT} %)"
-                    if abs(self.scale_pct - MH2O_PER_DBAR_PCT) < 0.3 else "")
+            hint = (f" (UVP depth in mH2O vs AUV depth in m: the units alone give +{self.ref_pct:.2f} %)"
+                    if abs(self.scale_pct - self.ref_pct) < 0.5 else "")
             out.append(f"UVP depth differs from AUV depth by {self.scale_pct:+.2f} % of depth{hint}")
         if abs(self.offset_m) > OFFSET_TOL_M:
             out.append(f"constant depth offset of {self.offset_m:+.2f} m between UVP and AUV")
@@ -96,7 +116,7 @@ def _fit(z, d, w):
     return float(coef[0]), float(coef[1]), float(coef[2]), rms
 
 
-def depth_agreement(binned: BinnedDepths, bin_seconds: float = 10.0) -> DepthAgreement | None:
+def depth_agreement(binned: BinnedDepths, bin_seconds: float = 10.0, lat: float | None = None) -> DepthAgreement | None:
     """Fit UVP - AUV = scale x depth + offset + lag x w on the 10 s median bins.
 
     w is the vertical velocity of the AUV depth: a clock lag shifts the two
@@ -120,7 +140,7 @@ def depth_agreement(binned: BinnedDepths, bin_seconds: float = 10.0) -> DepthAgr
             days.append({"day": ds, "scale_pct": 100 * res[0], "offset_m": res[1], "lag_s": res[2],
                          "n_bins": int((np.isfinite(z[m]) & np.isfinite(d[m])).sum())})
     n = int((np.isfinite(z) & np.isfinite(d) & np.isfinite(w)).sum())
-    return DepthAgreement(100 * whole[0], whole[1], whole[2], whole[3], n, days)
+    return DepthAgreement(100 * whole[0], whole[1], whole[2], whole[3], n, days, unit_reference_pct(z, lat))
 
 
 def plot_depth_agreement(out: Path, binned: BinnedDepths, agr: DepthAgreement) -> Path:
@@ -133,8 +153,8 @@ def plot_depth_agreement(out: Path, binned: BinnedDepths, agr: DepthAgreement) -
     zz = np.array([0, np.nanmax(z[ok])])
     ax.plot(zz, agr.scale_pct / 100 * zz + agr.offset_m, color=PHASE_COLOURS["d"], lw=1.5,
             label=f"fit: {agr.scale_pct:+.2f} % × depth {agr.offset_m:+.2f} m")
-    ax.plot(zz, MH2O_PER_DBAR_PCT / 100 * zz, color="0.3", ls="--", lw=1,
-            label=f"mH2O vs dbar alone: +{MH2O_PER_DBAR_PCT} %")
+    ax.plot(zz, agr.ref_pct / 100 * zz, color="0.3", ls="--", lw=1,
+            label=f"units alone (UVP mH2O vs AUV m): +{agr.ref_pct:.2f} %")
     ax.axhline(0, color="0.4", lw=0.8)
     ax.grid(True, color="0.9")
     ax.set_xlabel("AUV depth (m)")
@@ -430,7 +450,8 @@ def run_auv_qc(outdir, uvp_time_series: Sequence, uvp_depth_series: Sequence, ma
 
     t_uvp, z_uvp = _concat_series(uvp_time_series, uvp_depth_series)
     binned = bin_depths(t_uvp, z_uvp, match.auv_plot_time, match.auv_plot_depth)
-    agr = depth_agreement(binned)
+    lats = [np.nanmedian(p["track_lat"]) for p in match.phases if len(p.get("track_lat", []))]
+    agr = depth_agreement(binned, lat=float(np.nanmedian(lats)) if lats else None)
     if agr is None:
         lines.append("Depth agreement: not enough joint UVP/AUV data with a depth range")
     else:

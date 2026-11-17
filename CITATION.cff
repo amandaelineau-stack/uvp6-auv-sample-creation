@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "uvp6-auv-sample-creation: Python pipeline for UVP6 deployments on autonomous underwater vehicles"
+abstract: >-
+  Creates the UVPapp sample file of a UVP6 deployed on an autonomous underwater vehicle (AUV): the
+  deployment is sectioned into phases (downcasts, upcasts, transects, surface transects, transitions)
+  from the vehicle data, one netCDF file is written per phase, the UVP6 images are matched to each
+  phase, and the sample file, CTD files and quality checks are written. Developed and tested with the
+  Autosub Long Range (ALR).
+type: software
+authors:
+  - family-names: Hilder
+    given-names: Hans
+    orcid: "https://orcid.org/0009-0008-8882-0754"
+    affiliation: "National Oceanography Centre, Southampton, UK"
+  - family-names: Elineau
+    given-names: Amanda
+    orcid: "https://orcid.org/0000-0001-6724-9095"
+    affiliation: "National Oceanography Centre, Southampton, UK"
+version: "1.0"
+license: MIT
+repository-code: "https://github.com/hans-hilder/uvp6-auv-sample-creation"
+keywords:
+  - UVP6
+  - Underwater Vision Profiler
+  - autonomous underwater vehicle
+  - Autosub Long Range
+  - plankton imaging
+  - EcoTaxa
+  - EcoPart
