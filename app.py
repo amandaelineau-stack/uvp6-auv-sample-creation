@@ -24,6 +24,7 @@ from PIL import Image
 import auv_data
 import auv_plots
 from uvp_toolbox.create_samples import create_samples
+from uvp_toolbox.figure_layout import FIGURES, figure_path
 from uvp_toolbox.prompts import NullPrompter
 
 UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
@@ -190,9 +191,9 @@ def run_pipeline(vehicle, project, figures, name, cruise, ship, depth_int, time_
             df, profiles_df = auv_data.detect_profiles(big_df, **thresholds)
             df = auv_data.attach_profiles(df, profiles_df)
             fig, _ = auv_plots.plot_phase_detection(profiles_df, **thresholds, show=False)
-            fig.savefig(figures / f"{name}_phase_detection.png", dpi=150)
+            fig.savefig(figure_path(figures, "phase_detection", vehicle=name), dpi=150)
             fig, _ = auv_plots.plot_phase_sectioning(df, show=False)
-            fig.savefig(figures / f"{name}_phase_sectioning.png", dpi=150)
+            fig.savefig(figure_path(figures, "phase_sectioning", vehicle=name), dpi=150)
             plt.close("all")
             out["phase_warnings"] = auv_plots.check_phases(df)
         s.update(label="2. AUV phases identified", state="complete")
@@ -356,32 +357,32 @@ if res:
     st.download_button("Download all figures and QC files (zip)", zipped.getvalue(),
                        file_name=f"{name}_figures.zip", mime="application/zip", width=BUTTON_WIDTH)
 
-    def show(name, cap):
-        path = fig_dir / name
+    def show(key, cap):
+        path = figure_path(fig_dir, key, mkdir=False, vehicle=name)
         if path.exists():
             st.image(str(path), caption=cap)
             st.download_button(f"Download {path.name}", path.read_bytes(), file_name=path.name,
-                               mime="image/png", key=f"dl_{name}")
+                               mime="image/png", key=f"dl_{key}")
 
     t1, t2, t3, t4 = st.tabs(["Phases", "Quality checks", "Time–depth", "Messages"])
     with t1:
         for w in res["phase_warnings"]:
             st.warning(w)
-        show(f"{name}_phase_sectioning.png", "Phase sectioning: one block per phase (one netCDF file, one sample)")
-        show(f"{name}_phase_detection.png", "Phase detection: the two criteria and their thresholds")
+        show("phase_sectioning", "Phase sectioning: one block per phase (one netCDF file, one sample)")
+        show("phase_detection", "Phase detection: the two criteria and their thresholds")
     with t2:
-        summary = fig_dir / "qc_summary.txt"
+        summary = figure_path(fig_dir, "qc_summary", mkdir=False)
         if summary.exists():
             text = summary.read_text(encoding="utf-8")
-            (st.warning if "WARNING" in text else st.info)("Summary of the quality checks (qc_summary.txt)")
+            (st.warning if "WARNING" in text else st.info)(f"Summary of the quality checks ({FIGURES['qc_summary']})")
             st.code(text)
-        show("uvp_auv_depth_agreement.png", "Depth agreement between the UVP6 and the AUV")
-        show("uvp_auv_coverage_map.png", "UVP6 coverage: AUV track, red where the UVP6 has no image")
-        show("uvp_auv_sample_sizes.png", "Number of images per sample")
+        show("depth_time_regression", "Depth agreement between the UVP6 and the AUV: regression of the offset")
+        show("coverage_map", "UVP6 coverage: AUV track, red where the UVP6 has no image")
+        show("sample_sizes", "Number of images per sample")
     with t3:
-        show("uvp_auv_timedepth_fullspan.png", "UVP6 and AUV depth over the deployment")
-        show("overview_plots/uvp_auv_timedepth_all_days.png", "One panel per day")
-        show("uvp_auv_sampling_intervals.png", "Sampling intervals")
+        show("depth_time_deployment", "UVP6 and AUV depth over the deployment")
+        show("all_days", "One panel per day")
+        show("sampling_intervals", "Sampling intervals")
     with t4:
         for step, text in res["log"].items():
             with st.expander(f"Messages of step {step}"):
