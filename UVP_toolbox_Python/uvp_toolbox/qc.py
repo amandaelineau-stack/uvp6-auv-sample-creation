@@ -133,7 +133,7 @@ def plot_depth_agreement(out: Path, binned: BinnedDepths, agr: DepthAgreement) -
     ax.plot(z[ok], d[ok], ".", ms=1.5, color="0.6", rasterized=True)
     zz = np.array([0, np.nanmax(z[ok])])
     ax.plot(zz, agr.scale_pct / 100 * zz + agr.offset_m, color=PHASE_COLOURS["d"], lw=1.5,
-            label=f"fit: {agr.scale_pct:+.2f} % × depth {agr.offset_m:+.2f} m")
+            label=f"fit: {agr.scale_pct:+.2f} % × depth {agr.offset_m:+.2f} m (rms of residuals {agr.rms_m:.2f} m)")
     ax.axhline(0, color="0.4", lw=0.8, label="perfect agreement")
     ax.grid(True, color="0.9")
     ax.set_xlabel("AUV depth (m)")
