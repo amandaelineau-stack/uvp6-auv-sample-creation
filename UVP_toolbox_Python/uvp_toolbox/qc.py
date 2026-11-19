@@ -7,13 +7,14 @@ Not a MATLAB translation: these checks were added to the Python port.
     plot_coverage_map   the AUV track with those gaps, and the phases on a time line
     plot_sample_sizes   number of images per sample, by phase type
 
-Writes these figures, a table of the gaps, and a text summary:
+Writes these figures, a table of the gaps, and a text summary under the
+figures folder (folders in ``figure_layout``):
 
-    <outdir>/uvp_auv_depth_agreement.png
-    <outdir>/uvp_auv_coverage_map.png
-    <outdir>/uvp_auv_sample_sizes.png
-    <outdir>/qc_coverage.csv
-    <outdir>/qc_summary.txt
+    qc/depth_time_agreement_check/overview_plots/uvp_auv_depth_time_regression_offset.png
+    qc/coverage_check/uvp_auv_coverage_map.png
+    qc/coverage_check/qc_coverage.csv
+    qc/sample_size_interval_check/uvp_auv_sample_sizes.png
+    qc/qc_summary.txt
 """
 
 from __future__ import annotations
@@ -28,12 +29,8 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 
-try:  # TEOS-10, for the unit reference of the depth agreement
-    import gsw
-except ImportError:  # pragma: no cover
-    gsw = None
-
 from .diagnostics import BinnedDepths, bin_depths, _concat_series, _day_floor
+from .figure_layout import figure_path
 from .get_meta_from_vector_meta_file import AuvMatch
 from .matlab_compat import finite_times
 
@@ -53,26 +50,13 @@ __all__ = [
 PHASE_COLOURS = {"d": "#2a78d6", "u": "#eb6834", "t": "#1baf7a", "s": "#eda100", "x": "#5f5e5a"}
 PHASE_NAMES = {"d": "Downcast", "u": "Upcast", "t": "Transect", "s": "Surface transect", "x": "Transition"}
 
-# Warning thresholds of the depth agreement
-SCALE_TOL_PCT = 0.5     # |scale| above this: the two depths use different units or calibrations
+# Warning thresholds of the depth agreement. Both depths are in metres of seawater (the UVP6
+# reports depth in m for seawater; the AUV depth is from the CTD pressure with TEOS-10), so the
+# expected scale, offset and lag are all 0.
+SCALE_TOL_PCT = 0.5     # |scale| above this: the two depth sensors differ in calibration
 OFFSET_TOL_M = 0.5      # |offset| above this: sensor zero, or distance between the sensors
 LAG_TOL_S = 1.0         # |lag| above this: clock offset between the UVP and the AUV
-# A depth in metres of fresh water (mH2O) against a pressure in dbar reads this much deeper
-MH2O_PER_DBAR_PCT = 1.97
-MH2O_PER_DBAR = 1.0197
 
-
-def unit_reference_pct(z, lat=None):
-    """How much deeper (% of depth) a UVP depth in metres of fresh water reads than the AUV depth
-    when units alone differ. The AUV depth is in m from the pressure with TEOS-10 (#37): back to
-    pressure with gsw.p_from_z at the latitude `lat`, then x 1.0197; median over depths > 10 m.
-    Without latitude or gsw: +1.97 % (AUV depth = pressure in dbar)."""
-    z = np.asarray(z, dtype=float)
-    z = z[np.isfinite(z) & (z > 10)]
-    if gsw is None or lat is None or not np.isfinite(lat) or not z.size:
-        return MH2O_PER_DBAR_PCT
-    p = gsw.p_from_z(-z, lat)
-    return float(np.median(100 * (MH2O_PER_DBAR * p - z) / z))
 # Consecutive phases without UVP image are listed as a gap from this duration on
 MIN_GAP_HOURS = 1.0
 C_GAP = "#b3261e"
@@ -90,14 +74,11 @@ class DepthAgreement:
     rms_m: float            # what the model leaves unexplained
     n_bins: int
     days: list[dict] = field(default_factory=list)   # the same, per day
-    ref_pct: float = MH2O_PER_DBAR_PCT                # scale given by the units alone
 
     def warnings(self) -> list[str]:
         out = []
         if abs(self.scale_pct) > SCALE_TOL_PCT:
-            hint = (f" (UVP depth in mH2O vs AUV depth in m: the units alone give +{self.ref_pct:.2f} %)"
-                    if abs(self.scale_pct - self.ref_pct) < 0.5 else "")
-            out.append(f"UVP depth differs from AUV depth by {self.scale_pct:+.2f} % of depth{hint}")
+            out.append(f"UVP depth differs from AUV depth by {self.scale_pct:+.2f} % of depth")
         if abs(self.offset_m) > OFFSET_TOL_M:
             out.append(f"constant depth offset of {self.offset_m:+.2f} m between UVP and AUV")
         if abs(self.lag_s) > LAG_TOL_S:
@@ -116,7 +97,7 @@ def _fit(z, d, w):
     return float(coef[0]), float(coef[1]), float(coef[2]), rms
 
 
-def depth_agreement(binned: BinnedDepths, bin_seconds: float = 10.0, lat: float | None = None) -> DepthAgreement | None:
+def depth_agreement(binned: BinnedDepths, bin_seconds: float = 10.0) -> DepthAgreement | None:
     """Fit UVP - AUV = scale x depth + offset + lag x w on the 10 s median bins.
 
     w is the vertical velocity of the AUV depth: a clock lag shifts the two
@@ -140,7 +121,7 @@ def depth_agreement(binned: BinnedDepths, bin_seconds: float = 10.0, lat: float 
             days.append({"day": ds, "scale_pct": 100 * res[0], "offset_m": res[1], "lag_s": res[2],
                          "n_bins": int((np.isfinite(z[m]) & np.isfinite(d[m])).sum())})
     n = int((np.isfinite(z) & np.isfinite(d) & np.isfinite(w)).sum())
-    return DepthAgreement(100 * whole[0], whole[1], whole[2], whole[3], n, days, unit_reference_pct(z, lat))
+    return DepthAgreement(100 * whole[0], whole[1], whole[2], whole[3], n, days)
 
 
 def plot_depth_agreement(out: Path, binned: BinnedDepths, agr: DepthAgreement) -> Path:
@@ -152,10 +133,8 @@ def plot_depth_agreement(out: Path, binned: BinnedDepths, agr: DepthAgreement) -
     ax.plot(z[ok], d[ok], ".", ms=1.5, color="0.6", rasterized=True)
     zz = np.array([0, np.nanmax(z[ok])])
     ax.plot(zz, agr.scale_pct / 100 * zz + agr.offset_m, color=PHASE_COLOURS["d"], lw=1.5,
-            label=f"fit: {agr.scale_pct:+.2f} % × depth {agr.offset_m:+.2f} m")
-    ax.plot(zz, agr.ref_pct / 100 * zz, color="0.3", ls="--", lw=1,
-            label=f"units alone (UVP mH2O vs AUV m): +{agr.ref_pct:.2f} %")
-    ax.axhline(0, color="0.4", lw=0.8)
+            label=f"fit: {agr.scale_pct:+.2f} % × depth {agr.offset_m:+.2f} m (rms of residuals {agr.rms_m:.2f} m)")
+    ax.axhline(0, color="0.4", lw=0.8, label="perfect agreement")
     ax.grid(True, color="0.9")
     ax.set_xlabel("AUV depth (m)")
     ax.set_ylabel("UVP − AUV depth (m), 10 s medians")
@@ -188,7 +167,7 @@ def plot_depth_agreement(out: Path, binned: BinnedDepths, agr: DepthAgreement) -
     fig.suptitle("QC – UVP vs AUV depth – " + (f"{len(warn)} warning{'s' if len(warn) > 1 else ''}" if warn else "OK"),
                  x=0.01, ha="left", fontweight="bold", color="#b3261e" if warn else "black")
     fig.canvas.manager.set_window_title("QC – UVP vs AUV depth")
-    path = out / "uvp_auv_depth_agreement.png"
+    path = figure_path(out, "depth_time_regression")
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path
@@ -321,7 +300,7 @@ def coverage_table(phases: Sequence[dict], gaps: Sequence[CoverageGap], short: S
 
 def write_coverage_csv(out: Path, gaps: Sequence[CoverageGap]) -> Path:
     """qc_coverage.csv: one row per gap (header only when there is none)."""
-    path = out / "qc_coverage.csv"
+    path = figure_path(out, "coverage_csv")
     fields = ["gap", "start", "end", "duration_h", "start_lat", "start_lon", "end_lat", "end_lon",
               "distance_km", "phases", *PHASE_COLOURS]
     with open(path, "w", newline="", encoding="utf-8") as f:
@@ -399,7 +378,7 @@ def plot_coverage_map(out: Path, phases: Sequence[dict], gaps: Sequence[Coverage
     tl.set_title("Every AUV phase on a time line: coloured by type when it has UVP images, red when it has none; "
                  "above, the gaps from the last UVP image to the next", loc="left", fontsize=10)
     fig.canvas.manager.set_window_title("QC – UVP coverage")
-    path = out / "uvp_auv_coverage_map.png"
+    path = figure_path(out, "coverage_map")
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path, summary
@@ -430,7 +409,7 @@ def plot_sample_sizes(out: Path, samples: Sequence[tuple[str, str, int]], min_im
     summary = f"{len(small)} of {len(samples)} samples have fewer than {min_images} images" + (f" ({detail})" if detail else "")
     ax.set_title(f"QC – sample sizes: {summary} (red line)", loc="left")
     fig.canvas.manager.set_window_title("QC – sample sizes")
-    path = out / "uvp_auv_sample_sizes.png"
+    path = figure_path(out, "sample_sizes")
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path, summary
@@ -444,14 +423,12 @@ def run_auv_qc(outdir, uvp_time_series: Sequence, uvp_depth_series: Sequence, ma
                samples: Sequence[tuple[str, str, int]], min_images: int = 20, verbose: bool = True) -> dict:
     """Run the three checks, write their figures and ``qc_summary.txt``, print
     the summary, and return it with the figure paths."""
-    out = Path(outdir)
-    out.mkdir(parents=True, exist_ok=True)
+    out = Path(outdir)  # the figures folder: each output goes to its figure_layout path
     lines, written = [], {}
 
     t_uvp, z_uvp = _concat_series(uvp_time_series, uvp_depth_series)
     binned = bin_depths(t_uvp, z_uvp, match.auv_plot_time, match.auv_plot_depth)
-    lats = [np.nanmedian(p["track_lat"]) for p in match.phases if len(p.get("track_lat", []))]
-    agr = depth_agreement(binned, lat=float(np.nanmedian(lats)) if lats else None)
+    agr = depth_agreement(binned)
     if agr is None:
         lines.append("Depth agreement: not enough joint UVP/AUV data with a depth range")
     else:
@@ -471,7 +448,7 @@ def run_auv_qc(outdir, uvp_time_series: Sequence, uvp_depth_series: Sequence, ma
         smallest = sorted(samples, key=lambda s: s[2])[:5]
         lines.append("  smallest: " + ", ".join(f"{s[0]} ({s[2]})" for s in smallest))
 
-    (out / "qc_summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    figure_path(out, "qc_summary").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if verbose:
         print("\n--- Quality checks (also in qc_summary.txt) ---")
         print("\n".join(lines))

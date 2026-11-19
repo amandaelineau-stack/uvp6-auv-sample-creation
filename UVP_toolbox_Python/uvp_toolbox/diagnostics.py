@@ -2,13 +2,13 @@
 comparison plots, the sliding r² clock-offset estimate, and sampling-interval
 statistics.
 
-Currently writes these figures:
+Writes these figures under the figures folder (folders in ``figure_layout``):
 
-    <outdir>/uvp_auv_timedepth.png                     2 panels, linear axes
-    <outdir>/uvp_auv_timedepth_fullspan.png            3 panels incl. best offset
-    <outdir>/daily_plots/uvp_auv_timedepth_<date>.png  one per day with data
-    <outdir>/overview_plots/uvp_auv_timedepth_all_days.png
-    <outdir>/uvp_auv_sampling_intervals.png
+    qc/depth_time_agreement_check/overview_plots/uvp_auv_depth_time_deployment.png
+        3 panels: depths, depth difference, clock offset
+    qc/depth_time_agreement_check/overview_plots/uvp_auv_timedepth_all_days.png
+    qc/depth_time_agreement_check/daily_plots/uvp_auv_timedepth_<date>.png   one per day with data
+    qc/sample_size_interval_check/uvp_auv_sampling_intervals.png
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 
+from .figure_layout import figure_path
 from .matlab_compat import finite_times, seconds_between
 
 __all__ = [
@@ -313,7 +314,8 @@ def plot_one_day(ax_top, ax_bot, day_start, day_end, uvp_time_series, uvp_depth_
 
 def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Sequence,
                          auv_time=None, auv_depth=None, verbose: bool = True, gaps=()) -> dict[str, Path]:
-    """Write every time-depth diagnostic figure and return their paths.
+    """Write every time-depth diagnostic figure under the figures folder
+    ``outdir`` and return their paths.
 
     ``gaps``: (start, end) datetime64 pairs of the periods without UVP image
     (``qc.coverage_gaps``), shaded on every figure.
@@ -321,10 +323,6 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     # whole seconds, so that the conversion to Python datetimes for axvspan is exact
     gaps = [(np.datetime64(a, "s").astype("datetime64[ns]"), np.datetime64(b, "s").astype("datetime64[ns]")) for a, b in gaps]
     outdir = Path(outdir)
-    daily_dir = outdir / "daily_plots"
-    overview_dir = outdir / "overview_plots"
-    for d in (outdir, daily_dir, overview_dir):
-        d.mkdir(parents=True, exist_ok=True)
 
     t_uvp, z_uvp = _concat_series(uvp_time_series, uvp_depth_series)
     have_auv = auv_time is not None and np.asarray(auv_time).size > 0
@@ -336,7 +334,7 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     depth_diff = binned.uvp_med - binned.auv_med  # signed, so that a bias shows
     written: dict[str, Path] = {}
 
-    # ---- data extent (figures 1-2) and whole days (daily figures)
+    # ---- data extent (deployment figure) and whole days (daily figures)
     if not binned.empty:
         ft = finite_times(centers)
     elif t_uvp.size:
@@ -351,21 +349,9 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     data_end = (ft.max() + pad).astype("datetime64[s]").astype("datetime64[ns]")
     span = f"{_ts(ft.min()):%Y-%m-%d %H:%M} to {_ts(ft.max()):%Y-%m-%d %H:%M}"
 
-    # ---- (1) combined 2-panel figure
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7.5), constrained_layout=True)
-    plot_one_day(ax1, ax2, data_start, data_end, uvp_time_series, uvp_depth_series,
-                 have_auv, t_auv, z_auv, centers, depth_diff, title=f"UVP & AUV depth – {span}", gaps=gaps)
-    fig.canvas.manager.set_window_title("UVP & AUV depth")
-    out = outdir / "uvp_auv_timedepth.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    written["timedepth"] = out
-    if verbose:
-        print(f"Saved diagnostic plot to: {out}")
-
     lag_times, lag_best_sec, lag_r2 = lag_sweep(binned) if have_auv else (_EMPTY_T.copy(), _EMPTY_F.copy(), _EMPTY_F.copy())
 
-    # ---- (2) full-span 3-panel figure, with the clock offset
+    # ---- (1) deployment: 3 panels, the depths, their difference and the clock offset
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10.5), constrained_layout=True)
     plot_one_day(ax1, ax2, data_start, data_end, uvp_time_series, uvp_depth_series,
                  have_auv, t_auv, z_auv, centers, depth_diff, title=f"UVP & AUV depth – {span}", gaps=gaps)
@@ -393,14 +379,14 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
     ax3.sharex(ax2)
     _time_axis(ax3)
     fig.canvas.manager.set_window_title("UVP & AUV depth and clock offset")
-    out = outdir / "uvp_auv_timedepth_fullspan.png"
+    out = figure_path(outdir, "depth_time_deployment")
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    written["fullspan"] = out
+    written["deployment"] = out
     if verbose:
-        print(f"Saved full-span diagnostic plot to: {out}")
+        print(f"Saved deployment diagnostic plot to: {out}")
 
-    # ---- (3) daily plots
+    # ---- (2) daily plots
     if not binned.empty:
         day_starts = np.unique(_day_floor(centers[~np.isnat(centers)]))
     else:
@@ -419,7 +405,7 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
         fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(12, 7.5), constrained_layout=True)
         plot_one_day(ax_top, ax_bot, ds, de, uvp_time_series, uvp_depth_series,
                      have_auv, t_auv, z_auv, centers, depth_diff, gaps=gaps)
-        out = daily_dir / f"uvp_auv_timedepth_{_ts(ds):%Y-%m-%d}.png"
+        out = figure_path(outdir, "daily", date=f"{_ts(ds):%Y-%m-%d}")
         fig.savefig(out, dpi=150)
         plt.close(fig)
         daily.append(out)
@@ -427,7 +413,7 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
             print(f"Saved daily plot to: {out}")
     written["daily"] = daily
 
-    # ---- (4) overview: every day in its own top/bottom pair of tiles.
+    # ---- (3) overview: every day in its own top/bottom pair of tiles.
     # (The MATLAB grid is sized for one tile per day but draws two, so it never
     #  completed; the layout here is what that code intends.)
     ndays = len(day_starts)
@@ -456,7 +442,7 @@ def make_timedepth_plots(outdir, uvp_time_series: Sequence, uvp_depth_series: Se
             ax_bot.sharex(ax_top)
             ax_bot.set_xlabel("")
             ax_bot.tick_params(axis="x", labelbottom=False)
-        out = overview_dir / "uvp_auv_timedepth_all_days.png"
+        out = figure_path(outdir, "all_days")
         fig.savefig(out, dpi=200)
         plt.close(fig)
         written["overview"] = out
@@ -490,9 +476,8 @@ def _report(label: str, x: np.ndarray) -> None:
 
 
 def sampling_interval_diagnostics(outdir, uvp_time_series: Sequence, auv_time=None) -> dict:
-    """Print median/mean sampling intervals and save the histogram figure."""
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    """Print median/mean sampling intervals and save the histogram figure
+    under the figures folder ``outdir``."""
     print("\n--- Sampling interval diagnostics ---")
     uvp_intervals = _intervals(uvp_time_series)
     _report("UVP", uvp_intervals)
@@ -504,15 +489,21 @@ def sampling_interval_diagnostics(outdir, uvp_time_series: Sequence, auv_time=No
         x = x[np.isfinite(x)]
         if x.size == 0:
             continue
-        bins = np.arange(math.floor(x.min()), math.floor(x.max()) + 2, 1.0)  # BinWidth 1
-        ax.hist(x, bins=bins, alpha=0.6, label=label, color=color)
+        # 1 s bins from 0 to the 99.9th percentile (at least 10 s): the gaps between deployments
+        # (days) and backward time jumps would otherwise ask for millions of bins
+        top = max(10, math.ceil(np.percentile(x, 99.9)))
+        n_over, n_neg = int((x > top + 1).sum()), int((x < 0).sum())
+        notes = ([f"{n_over:,} > {top + 1} s"] if n_over else []) + ([f"{n_neg:,} < 0 s"] if n_neg else [])
+        bins = np.arange(0, top + 2, 1.0)  # BinWidth 1
+        ax.hist(x, bins=bins, alpha=0.6, color=color,
+                label=label + (f" (not shown: {', '.join(notes)})" if notes else ""))
     ax.grid(True)
     ax.set_xlabel("Interval between measurements (s)")
     ax.set_ylabel("Count")
     if ax.get_legend_handles_labels()[0]:
-        ax.legend()
+        ax.legend(loc="upper left")  # fixed: loc="best" is slow with many bars
     ax.set_title("UVP vs AUV sampling interval distribution")
-    out = outdir / "uvp_auv_sampling_intervals.png"
+    out = figure_path(outdir, "sampling_intervals")
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return {"uvp_intervals": uvp_intervals, "auv_intervals": auv_intervals, "figure": out}

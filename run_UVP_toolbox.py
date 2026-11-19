@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import auv_data
 import auv_plots
 from uvp_toolbox.create_samples import create_samples
+from uvp_toolbox.figure_layout import figure_path
 from uvp_toolbox.prompts import TkPrompter
 
 # Name and serial number of the AUV (letters, digits, _): starts the netCDF and figure names, names the
@@ -90,11 +91,11 @@ df, profiles_df = auv_data.detect_profiles(big_df, **PHASE_DETECTION)
 df = auv_data.attach_profiles(df, profiles_df)
 
 fig, _ = auv_plots.plot_phase_detection(profiles_df, **PHASE_DETECTION, show=False)
-fig.savefig(out_dir / f"{VEHICLE_NAMESN}_phase_detection.png", dpi=150)
+fig.savefig(figure_path(out_dir, "phase_detection", vehicle=VEHICLE_NAMESN), dpi=150)
 plt.show()
 
 fig, _ = auv_plots.plot_phase_sectioning(df, show=False)
-fig.savefig(out_dir / f"{VEHICLE_NAMESN}_phase_sectioning.png", dpi=150)
+fig.savefig(figure_path(out_dir, "phase_sectioning", vehicle=VEHICLE_NAMESN), dpi=150)
 plt.show()
 
 auv_plots.check_phases(df)  # prints the phase durations and any warning
