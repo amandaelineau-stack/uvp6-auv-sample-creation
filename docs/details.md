@@ -136,13 +136,13 @@ Phases are coloured as in the documentation: d downcast (blue), u upcast (orange
 | `uvp_auv_depth_time_deployment.png`, `uvp_auv_timedepth_all_days.png`, `daily_plots/` | UVP6 (dots) and AUV (line) depth, the UVP − AUV depth difference (10 s medians), and, in `uvp_auv_depth_time_deployment.png`, the AUV → UVP clock offset of each 31 × 10 s window, coloured by r²; the median over reliable windows (r² ≥ 0.9) is printed and drawn. The AUV depth is drawn over the whole deployment, and the gaps of the coverage map are shaded red. | A constant depth difference points to a pressure offset, a difference growing with depth to a scale difference, and a non-zero median offset to a clock offset. |
 | `uvp_auv_sampling_intervals.png` | Distribution of the time between two UVP6 images and two AUV records. | Gaps or irregular sampling. |
 | `uvp_auv_depth_time_regression_offset.png` | UVP − AUV depth against AUV depth (10 s medians), with the fit UVP − AUV = scale × depth + offset + lag × vertical velocity, over the deployment and per day. | A WARNING when \|scale\| > 0.5 %, \|offset\| > 0.5 m or \|lag\| > 1 s. Both depths are in metres of seawater (UVP6 depth; AUV depth from the CTD pressure with TEOS-10), so all three should be near 0. A lag that grows day after day is a drifting clock. |
-| `uvp_auv_coverage_map.png` | The AUV track seen from above, coloured by phase type where the UVP6 has images and red where it has none, with the time and position where each gap starts and ends; below, every phase on a time line. | Where and when the UVP6 did not record. A gap runs from the last UVP6 image before it to the first one after it, and is listed when it lasts 1 h or more (`MIN_GAP_HOURS` in `qc.py`). |
+| `uvp_auv_coverage_map.png` | The AUV track seen from above, coloured by phase type where the UVP6 has images and red where it has none, with the time and position where each gap starts and ends; below, every phase on a time line. | Where and when the UVP6 did not record. A gap runs from the last UVP6 image before it to the first one after it, whether inside a phase or across phases, and is listed when it lasts 1 h or more (`MIN_GAP_HOURS` in `qc.py`). |
 | `uvp_auv_sample_sizes.png` | Images per sample, by phase type, with the `qc_min_images` limit of `create_samples` (20 by default). | Very small samples, usually transitions, not worth processing in UVPapp. |
 
 The quality checks of cell 4 are also printed and written to `qc/qc_summary.txt`: the depth agreement,
 the deployment (start, end, track length), a table of the phases by type (number, number with
 images, images) and the gaps. The gaps are also in `qc/coverage_check/qc_coverage.csv`: start and end time, duration,
-start and end position, track length and the phases by type. Cell 2 prints the phase checks of
+start and end position, track length and the phases it overlaps, by type. Cell 2 prints the phase checks of
 `auv_plots.check_phases`: the duration of each phase type, a warning for a segment without an
 upcast, and a warning for a transition longer than 30 min.
 

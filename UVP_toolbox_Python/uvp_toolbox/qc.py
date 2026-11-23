@@ -198,13 +198,31 @@ def _track(phases: Sequence[dict]):
             np.concatenate([p["track_lon"] for p in parts])[order])
 
 
+def _seconds(t) -> np.ndarray:
+    return (np.asarray(t, dtype="datetime64[ns]") - np.datetime64(0, "ns")) / np.timedelta64(1, "s")
+
+
+def _segment(track, start, end) -> tuple[np.ndarray, np.ndarray]:
+    """Lat, lon of the track from start to end, both ends interpolated."""
+    t, lat, lon = track
+    if not t.size:
+        return np.array([]), np.array([])
+    inside = (t > start) & (t < end)
+    s, (a, b) = _seconds(t), _seconds([start, end])
+    return tuple(np.r_[np.interp(a, s, v), v[inside], np.interp(b, s, v)] for v in (lat, lon))
+
+
+def _overlaps(phase: dict, start, end) -> bool:
+    return phase["start"] < end and phase["end"] > start
+
+
 @dataclass
 class CoverageGap:
-    """A run of consecutive AUV phases without UVP image, from the last UVP
-    image before it to the first one after it."""
+    """A period without UVP image, from the last UVP image before it to the
+    first one after it, or to the start or end of the deployment."""
     start: np.datetime64
     end: np.datetime64
-    phases: list[dict]
+    phases: list[dict]      # the AUV phases it overlaps, wholly or in part
     lat: np.ndarray         # AUV track from start to end, both ends interpolated
     lon: np.ndarray
 
@@ -223,53 +241,28 @@ class CoverageGap:
                 "phases": len(self.phases), **{c: n[c] for c in PHASE_COLOURS}}
 
 
-def coverage_gaps(phases: Sequence[dict], uvp_times=None, min_hours: float = MIN_GAP_HOURS
-                  ) -> tuple[list[CoverageGap], list[CoverageGap]]:
-    """Group the time-ordered phases without UVP image into runs; return the
-    runs of at least ``min_hours`` (the gaps) and the shorter ones apart: a
-    short transition without image is not a loss of data.
+def coverage_gaps(phases: Sequence[dict], uvp_times, min_hours: float = MIN_GAP_HOURS) -> list[CoverageGap]:
+    """The periods of at least ``min_hours`` without UVP image during the deployment.
 
-    With ``uvp_times`` (every UVP image time), a run is widened to the last
-    image before it and the first image after it, as the images can stop or
-    start again inside a phase that has some.
+    They are found from the UVP image times alone, so a pause in the images
+    inside a phase or across phase boundaries is a gap, as much as a run of
+    phases without image. The deployment runs from the start of the first AUV
+    phase to the end of the last; a gap before the first image or after the
+    last one starts or ends there.
     """
     rows = sorted((p for p in phases if p["start"] is not None), key=lambda p: p["start"])
-    runs, cur = [], []
-    for p in rows:
-        if p["n_images"] == 0:
-            cur.append(p)
-        elif cur:
-            runs.append(cur)
-            cur = []
-    if cur:
-        runs.append(cur)
-
-    uvp = np.sort(finite_times(np.asarray(uvp_times, dtype="datetime64[ns]").ravel())) if uvp_times is not None else None
-    t_all, lat_all, lon_all = _track(rows)
-    sec = lambda t: (np.asarray(t, dtype="datetime64[ns]") - np.datetime64(0, "ns")) / np.timedelta64(1, "s")
-    gaps = []
-    for r in runs:
-        start, end = r[0]["start"], r[-1]["end"]
-        if uvp is not None and uvp.size:
-            i = np.searchsorted(uvp, start)
-            if i > 0:
-                start = uvp[i - 1]
-            j = np.searchsorted(uvp, end, side="right")
-            if j < uvp.size:
-                end = uvp[j]
-        inside = (t_all > start) & (t_all < end)
-        if t_all.size:
-            ends = sec(np.array([start, end], dtype="datetime64[ns]"))
-            lat = np.r_[np.interp(ends[0], sec(t_all), lat_all), lat_all[inside], np.interp(ends[1], sec(t_all), lat_all)]
-            lon = np.r_[np.interp(ends[0], sec(t_all), lon_all), lon_all[inside], np.interp(ends[1], sec(t_all), lon_all)]
-        else:
-            lat = lon = np.array([])
-        gaps.append(CoverageGap(start, end, r, lat, lon))
-    return [g for g in gaps if g.hours >= min_hours], [g for g in gaps if g.hours < min_hours]
+    if not rows:
+        return []
+    t0, t1 = np.datetime64(rows[0]["start"], "ns"), np.datetime64(max(p["end"] for p in rows), "ns")
+    uvp = np.sort(finite_times(uvp_times))
+    edges = np.concatenate([[t0], uvp[(uvp > t0) & (uvp < t1)], [t1]])
+    long = np.flatnonzero(np.diff(edges) / np.timedelta64(1, "h") >= min_hours)
+    track = _track(rows)
+    return [CoverageGap(start, end, [p for p in rows if _overlaps(p, start, end)], *_segment(track, start, end))
+            for start, end in zip(edges[long], edges[long + 1])]
 
 
-def coverage_table(phases: Sequence[dict], gaps: Sequence[CoverageGap], short: Sequence[CoverageGap],
-                   min_hours: float = MIN_GAP_HOURS) -> list[str]:
+def coverage_table(phases: Sequence[dict], gaps: Sequence[CoverageGap], min_hours: float = MIN_GAP_HOURS) -> list[str]:
     """The deployment, the phases by type and the gaps, as lines of qc_summary.txt."""
     rows = [p for p in phases if p["start"] is not None]
     t0, t1 = min(p["start"] for p in rows), max(p["end"] for p in rows)
@@ -291,9 +284,10 @@ def coverage_table(phases: Sequence[dict], gaps: Sequence[CoverageGap], short: S
         out.append(f"  {r['gap']}  {r['start'][:16]} to {r['end'][:16]}  {r['duration_h']} h  "
                    f"from {r['start_lat']}, {r['start_lon']} to {r['end_lat']}, {r['end_lon']}  "
                    f"{r['distance_km']} km  {r['phases']} phases")
+    short = [p for p in rows if p["n_images"] == 0 and not any(_overlaps(p, g.start, g.end) for g in gaps)]
     if short:
-        n = Counter(p["letter"] for g in short for p in g.phases)
-        out.append(f"  and {sum(len(g.phases) for g in short)} phase(s) without image in shorter runs, not gaps ("
+        n = Counter(p["letter"] for p in short)
+        out.append(f"  and {len(short)} phase(s) without image in shorter runs, not gaps ("
                    + ", ".join(f"{n[k]} {k}" for k in PHASE_COLOURS if n[k]) + ")")
     return out
 
@@ -348,7 +342,7 @@ def plot_coverage_map(out: Path, phases: Sequence[dict], gaps: Sequence[Coverage
                             fontsize=9, color=C_GAP, fontweight="bold", zorder=7,
                             bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
     handles = [plt.Line2D([], [], color=PHASE_COLOURS[k], lw=2, label=f"{k} – {PHASE_NAMES[k]}") for k in PHASE_COLOURS]
-    if n_miss:
+    if n_miss or gaps:
         handles.append(plt.Line2D([], [], color=C_GAP, lw=2.5, label="no UVP image"))
     ax.legend(handles=handles, loc="best", fontsize=9)
     ax.grid(True, color="0.9")
@@ -438,10 +432,10 @@ def run_auv_qc(outdir, uvp_time_series: Sequence, uvp_depth_series: Sequence, ma
         lines += [f"  WARNING: {w}" for w in agr.warnings()]
 
     if match.phases:
-        gaps, short = coverage_gaps(match.phases, t_uvp)
+        gaps = coverage_gaps(match.phases, t_uvp)
         written["coverage_map"], _ = plot_coverage_map(out, match.phases, gaps)
         written["coverage_csv"] = write_coverage_csv(out, gaps)
-        lines += coverage_table(match.phases, gaps, short)
+        lines += coverage_table(match.phases, gaps)
     if samples:
         written["sample_sizes"], summary = plot_sample_sizes(out, samples, min_images)
         lines.append(f"Sample sizes: {summary}")

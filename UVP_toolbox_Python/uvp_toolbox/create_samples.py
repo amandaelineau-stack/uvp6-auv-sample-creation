@@ -457,7 +457,7 @@ def create_samples(
             gaps = []
             if res is not None:  # periods without UVP image, shaded on the time-depth figures
                 t_uvp = np.concatenate([np.asarray(t, dtype="datetime64[ns]").ravel() for t in uvp_time_series])
-                gaps = [(g.start, g.end) for g in coverage_gaps(res.phases, t_uvp)[0]]
+                gaps = [(g.start, g.end) for g in coverage_gaps(res.phases, t_uvp)]
             make_timedepth_plots(outdir, uvp_time_series, uvp_depth_series, auv_time, auv_depth, gaps=gaps)
         except Exception as exc:  # the MATLAB block is wrapped the same way
             print(f"Plotting skipped: {exc}")
